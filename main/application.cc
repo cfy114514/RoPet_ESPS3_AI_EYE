@@ -4,6 +4,7 @@
 #include "system_info.h"
 #include "ml307_ssl_transport.h"
 #include "audio_codec.h"
+#include "opus_codec.h"
 #include "mqtt_protocol.h"
 #include "websocket_protocol.h"
 #include "font_awesome_symbols.h"
@@ -35,7 +36,11 @@ static const char* const STATE_STRINGS[] = {
 
 Application::Application() {
     event_group_ = xEventGroupCreate();
+#ifdef CONFIG_IDF_TARGET_ESP32C2
     background_task_ = new BackgroundTask(2048);
+#else
+    background_task_ = new BackgroundTask(4096 * 8);
+#endif
 }
 
 Application::~Application() {
@@ -287,23 +292,19 @@ void Application::Start() {
 
     /* Setup the audio codec */
     auto codec = board.GetAudioCodec();
-    opus_decode_sample_rate_ = codec->output_sample_rate();
-    opus_decoder_ = std::make_unique<OpusDecoderWrapper>(opus_decode_sample_rate_, 1, OPUS_FRAME_DURATION_MS);
-    opus_encoder_ = std::make_unique<OpusEncoderWrapper>(16000, 1, OPUS_FRAME_DURATION_MS);
-    // For ML307 boards, we use complexity 5 to save bandwidth
-    // For other boards, we use complexity 3 to save CPU
-    if (board.GetBoardType() == "ml307") {
-        ESP_LOGI(TAG, "ML307 board detected, setting opus encoder complexity to 5");
-        opus_encoder_->SetComplexity(5);
-    } else {
-        ESP_LOGI(TAG, "WiFi board detected, setting opus encoder complexity to 3");
-        opus_encoder_->SetComplexity(3);
-    }
 
+    auto opus_codec = board.GetOpusCodec();
+    opus_decode_sample_rate_ = codec->output_sample_rate();
+    opus_codec->DecodeConfig(opus_decode_sample_rate_, 1, OPUS_FRAME_DURATION_MS);
+    opus_codec->EncodeConfig(16000, 1, OPUS_FRAME_DURATION_MS);
+
+#if CONFIG_USE_AUDIO_PROCESSING
     if (codec->input_sample_rate() != 16000) {
         input_resampler_.Configure(codec->input_sample_rate(), 16000);
         reference_resampler_.Configure(codec->input_sample_rate(), 16000);
     }
+#endif
+
     codec->OnInputReady([this, codec]() {
         BaseType_t higher_priority_task_woken = pdFALSE;
         xEventGroupSetBitsFromISR(event_group_, AUDIO_INPUT_READY_EVENT, &higher_priority_task_woken);
@@ -321,8 +322,11 @@ void Application::Start() {
         Application* app = (Application*)arg;
         app->MainLoop();
         vTaskDelete(NULL);
-    }, "main_loop", 3072, this, 2, nullptr);
-
+#ifdef CONFIG_IDF_TARGET_ESP32C2
+    }, "main_loop", 4096, this, 2, nullptr);
+#else
+    }, "main_loop", 4096 * 2, this, 2, nullptr);
+#endif
     /* Wait for the network to be ready */
     board.StartNetwork();
 
@@ -438,7 +442,8 @@ void Application::Start() {
     audio_processor_.Initialize(codec->input_channels(), codec->input_reference());
     audio_processor_.OnOutput([this](std::vector<int16_t>&& data) {
         background_task_->Schedule([this, data = std::move(data)]() mutable {
-            opus_encoder_->Encode(std::move(data), [this](std::vector<uint8_t>&& opus) {
+            auto opus_codec = board.GetOpusCodec();
+            opus_codec->Encode(std::move(data), [this](std::vector<uint8_t>&& opus) {
                 Schedule([this, opus = std::move(opus)]() {
                     protocol_->SendAudio(opus);
                 });
@@ -534,7 +539,8 @@ void Application::MainLoop() {
 
 void Application::ResetDecoder() {
     std::lock_guard<std::mutex> lock(mutex_);
-    opus_decoder_->ResetState();
+    auto opus_codec = Board::GetInstance().GetOpusCodec();
+    opus_codec->DecodeResetState();
     audio_decode_queue_.clear();
     last_output_time_ = std::chrono::steady_clock::now();
 }
@@ -570,20 +576,15 @@ void Application::OutputAudio() {
         if (aborted_) {
             return;
         }
-
-        std::vector<int16_t> pcm;
-        if (!opus_decoder_->Decode(std::move(opus), pcm)) {
+        int resample = -1;
+        std::vector<int16_t> pcm; 
+        auto opus_codec = Board::GetInstance().GetOpusCodec();
+        if (opus_decode_sample_rate_ != codec->output_sample_rate()) {
+            resample = codec->output_sample_rate();
+        }
+        if (!opus_codec->Decode(std::move(opus), pcm, resample)) {
             return;
         }
-
-        // Resample if the sample rate is different
-        if (opus_decode_sample_rate_ != codec->output_sample_rate()) {
-            int target_size = output_resampler_.GetOutputSamples(pcm.size());
-            std::vector<int16_t> resampled(target_size);
-            output_resampler_.Process(pcm.data(), pcm.size(), resampled.data());
-            pcm = std::move(resampled);
-        }
-        
         codec->OutputData(pcm);
     });
 }
@@ -591,11 +592,15 @@ void Application::OutputAudio() {
 void Application::InputAudio() {
     auto codec = Board::GetInstance().GetAudioCodec();
     std::vector<int16_t> data;
+    std::vector<int16_t> resampled_data;
     if (!codec->InputData(data)) {
         return;
     }
-
+    
+#if CONFIG_USE_AUDIO_PROCESSING
     if (codec->input_sample_rate() != 16000) {
+        input_resampler_.Configure(codec->input_sample_rate(), 16000);
+        reference_resampler_.Configure(codec->input_sample_rate(), 16000);
         if (codec->input_channels() == 2) {
             auto mic_channel = std::vector<int16_t>(data.size() / 2);
             auto reference_channel = std::vector<int16_t>(data.size() / 2);
@@ -607,33 +612,38 @@ void Application::InputAudio() {
             auto resampled_reference = std::vector<int16_t>(reference_resampler_.GetOutputSamples(reference_channel.size()));
             input_resampler_.Process(mic_channel.data(), mic_channel.size(), resampled_mic.data());
             reference_resampler_.Process(reference_channel.data(), reference_channel.size(), resampled_reference.data());
-            data.resize(resampled_mic.size() + resampled_reference.size());
+            resampled_data.resize(resampled_mic.size() + resampled_reference.size());
             for (size_t i = 0, j = 0; i < resampled_mic.size(); ++i, j += 2) {
-                data[j] = resampled_mic[i];
-                data[j + 1] = resampled_reference[i];
+                resampled_data[j] = resampled_mic[i];
+                resampled_data[j + 1] = resampled_reference[i];
             }
         } else {
-            auto resampled = std::vector<int16_t>(input_resampler_.GetOutputSamples(data.size()));
-            input_resampler_.Process(data.data(), data.size(), resampled.data());
-            data = std::move(resampled);
+            resampled_data.resize(input_resampler_.GetOutputSamples(data.size()));
+            input_resampler_.Process(data.data(), data.size(), resampled_data.data());
         }
     }
     
-#if CONFIG_USE_AUDIO_PROCESSING
     if (audio_processor_.IsRunning()) {
-        audio_processor_.Input(data);
+        audio_processor_.Input(resampled_data);
     }
     if (wake_word_detect_.IsDetectionRunning()) {
-        wake_word_detect_.Feed(data);
+        wake_word_detect_.Feed(resampled_data);
     }
 #else
     if (device_state_ == kDeviceStateListening) {
         background_task_->Schedule([this, data = std::move(data)]() mutable {
-            opus_encoder_->Encode(std::move(data), [this](std::vector<uint8_t>&& opus) {
+            int resample = -1;
+            auto codec = Board::GetInstance().GetAudioCodec();
+            auto opus_codec = Board::GetInstance().GetOpusCodec();
+
+            if(codec->input_sample_rate() != 16000){
+                resample = 16000;
+            }
+            opus_codec->Encode(std::move(data), [this](std::vector<uint8_t>&& opus) {
                 Schedule([this, opus = std::move(opus)]() {
                     protocol_->SendAudio(opus);
                 });
-            });
+            }, resample);
         });
     }
 #endif
@@ -657,6 +667,7 @@ void Application::SetDeviceState(DeviceState state) {
 
     auto& board = Board::GetInstance();
     auto codec = board.GetAudioCodec();
+    auto opus_codec = board.GetOpusCodec();
     auto display = board.GetDisplay();
     auto led = board.GetLed();
     led->OnStateChanged();
@@ -677,7 +688,7 @@ void Application::SetDeviceState(DeviceState state) {
             display->SetStatus("聆听中...");
             display->SetEmotion("neutral");
             ResetDecoder();
-            opus_encoder_->ResetState();
+            opus_codec->EncodeResetState();
 #if CONFIG_USE_AUDIO_PROCESSING
             audio_processor_.Start();
 #endif
@@ -703,14 +714,9 @@ void Application::SetDecodeSampleRate(int sample_rate) {
     }
 
     opus_decode_sample_rate_ = sample_rate;
-    opus_decoder_.reset();
-    opus_decoder_ = std::make_unique<OpusDecoderWrapper>(opus_decode_sample_rate_, 1);
 
-    auto codec = Board::GetInstance().GetAudioCodec();
-    if (opus_decode_sample_rate_ != codec->output_sample_rate()) {
-        ESP_LOGI(TAG, "Resampling audio from %d to %d", opus_decode_sample_rate_, codec->output_sample_rate());
-        output_resampler_.Configure(opus_decode_sample_rate_, codec->output_sample_rate());
-    }
+    auto opus_codec = Board::GetInstance().GetOpusCodec();
+    opus_codec->EncodeConfig(opus_decode_sample_rate_, 1);
 }
 
 void Application::UpdateIotStates() {

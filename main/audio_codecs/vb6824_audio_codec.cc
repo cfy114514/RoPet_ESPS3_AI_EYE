@@ -15,19 +15,28 @@ extern "C" {
 }
 #include "esp_log.h"
 
+#define OPUS
+
 static const char *TAG = "vb6824";
 
 #define UART_API_UART_NUM    UART_NUM_1
 #define MAX_UART_USER_LEN    2048
 #define UART_RX_BUFFER_SIZE  (MAX_UART_USER_LEN * 2)
-#define UART_TX_BUFFER_SIZE  MAX_UART_USER_LEN * 2
+#define UART_TX_BUFFER_SIZE  (MAX_UART_USER_LEN * 2)
 
 #define UART_QUEUE_SIZE      128
 
-#define AUDIO_CHENK_LEN     40
-#define AUDIO_CHENK_MS      20
-#define SEND_BUF_LENGTH     AUDIO_CHENK_LEN*20
-#define RECV_BUF_LENGTH     AUDIO_CHENK_LEN*20
+#ifdef OPUS
+#define AUDIO_RECV_CHENK_LEN     40
+#define AUDIO_SEND_CHENK_LEN     40
+#define AUDIO_SEND_CHENK_MS      20
+#else
+#define AUDIO_RECV_CHENK_LEN     512
+#define AUDIO_SEND_CHENK_LEN     480
+#define AUDIO_SEND_CHENK_MS      15
+#endif
+#define SEND_BUF_LENGTH         AUDIO_SEND_CHENK_LEN*20
+#define RECV_BUF_LENGTH         AUDIO_RECV_CHENK_LEN*20
 
 #define VB_PLAY_SAMPLE_RATE     16 * 1000
 #define VB_RECO_SAMPLE_RATE     16 * 1000
@@ -106,10 +115,14 @@ void VbAduioCodec::vb6824_parse(uint8_t *data, uint16_t len){
 void VbAduioCodec::vb6824_recv_cb(vb6824_cmd_t cmd, uint8_t *data, uint16_t len){
 
     if(cmd == VB6824_CMD_RECV_PCM){
-        if (rbuffer_used_size(play_buf) <= 0)
+        if (rbuffer_used_size(play_buf) < AUDIO_SEND_CHENK_LEN)
         {
             rbuffer_push(recv_buf, data, len, 1);
-            if (rbuffer_used_size(recv_buf) >= AUDIO_CHENK_LEN)
+#ifdef OPUS
+            if (rbuffer_used_size(recv_buf) >= 40)
+#else
+            if (rbuffer_used_size(recv_buf) >= 960)
+#endif
             {
                 if (on_input_ready_)
                 {
@@ -127,7 +140,6 @@ void VbAduioCodec::vb6824_recv_cb(vb6824_cmd_t cmd, uint8_t *data, uint16_t len)
         }
         ESP_LOGI(TAG, "vb6824_recv cmd: %04x, len: %d :%.*s", cmd, len, len, data);
     }
-    
 }
 
 
@@ -162,7 +174,7 @@ void VbAduioCodec::uart_init(gpio_num_t tx, gpio_num_t rx){
 
 void VbAduioCodec::vb6824_send(vb6824_cmd_t cmd, uint8_t *data, uint16_t len){
     uint16_t packet_len = 0;
-    uint8_t *packet = (uint8_t*)malloc(512);
+    uint8_t packet[AUDIO_SEND_CHENK_LEN+7];
 
     int16_t idx = 0;
     uint16_t send_len = len;
@@ -187,40 +199,43 @@ void VbAduioCodec::vb6824_send(vb6824_cmd_t cmd, uint8_t *data, uint16_t len){
         uart_write_bytes(UART_API_UART_NUM, packet, packet_len);
         uart_flush(UART_API_UART_NUM);
     }
-    free(packet);
 }
 
 void VbAduioCodec::send_thread() {
     uint8_t playing = 0;
-    uint8_t *data = (uint8_t *)malloc(sizeof(uint8_t)*512);
+    uint8_t *data = (uint8_t *)malloc(sizeof(uint8_t)*AUDIO_SEND_CHENK_LEN);
     TickType_t xLastWakeTime = xTaskGetTickCount(); // 获取当前的 Tick 计数
     while (1) {
-        if (rbuffer_used_size(play_buf) >= AUDIO_CHENK_LEN)
+        if (rbuffer_used_size(play_buf) >= AUDIO_SEND_CHENK_LEN)
         {
+#ifdef OPUS
             if(playing == 0){
-                ESP_LOGE(TAG, "start");
+                // ESP_LOGE(TAG, "start");
                 playing = 1;
                 uint8_t data1[1] = {1};
                 vb6824_send(VB6824_CMD_SEND_PCM_EOF, data1, sizeof(data1));
             }
-            if(xTaskGetTickCount() - xLastWakeTime > pdMS_TO_TICKS(20)){
+#endif
+            if(xTaskGetTickCount() - xLastWakeTime > pdMS_TO_TICKS(AUDIO_SEND_CHENK_MS)){
                 xLastWakeTime = xTaskGetTickCount();
             }
-            rbuffer_pop(play_buf, (void*)data, AUDIO_CHENK_LEN);
-            vb6824_send(VB6824_CMD_SEND_PCM, data, AUDIO_CHENK_LEN);
+            rbuffer_pop(play_buf, (void*)data, AUDIO_SEND_CHENK_LEN);
+            vb6824_send(VB6824_CMD_SEND_PCM, data, AUDIO_SEND_CHENK_LEN);
             if(on_output_ready_) on_output_ready_();
-            vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(AUDIO_CHENK_MS));
+            vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(AUDIO_SEND_CHENK_MS));
         }else{
+#ifdef OPUS
             if(playing == 1){
-                if(xTaskGetTickCount() - xLastWakeTime > pdMS_TO_TICKS(200)){
-                    ESP_LOGE(TAG, "stop");
+                if(xTaskGetTickCount() - xLastWakeTime > pdMS_TO_TICKS(150)){
+                    // ESP_LOGE(TAG, "stop");
                     playing = 0;
                     uint8_t data1[1] = {0};
                     vb6824_send(VB6824_CMD_SEND_PCM_EOF, data1, sizeof(data1));
                 }
             }
+#endif
             if(on_output_ready_) {on_output_ready_();} else{ESP_LOGE(TAG, "SDF");}
-            vTaskDelay(pdMS_TO_TICKS(AUDIO_CHENK_MS));
+            vTaskDelay(pdMS_TO_TICKS(10));
         }
     }
 }
@@ -247,14 +262,14 @@ void VbAduioCodec::Start() {
 
     // uint8_t group = 0;
     // vb6824_send(VB6824_CMD_SEND_CTL, &group, 1);
-    SetOutputVolume(80);
+    SetOutputVolume(60);
 
     xTaskCreate([](void *arg){
         VbAduioCodec * this_ = (VbAduioCodec *)arg;
         this_->send_thread();
-    }, "play_thread", 2048, this, 8, NULL);
+    }, "play_thread", 2048 + 1024, this, 8, NULL);
 }
-
+#ifdef OPUS
 bool VbAduioCodec::InputData(std::vector<int16_t>& data) {
     data.resize(20);
     int samples = Read(data.data(), data.size());
@@ -267,6 +282,7 @@ bool VbAduioCodec::InputData(std::vector<int16_t>& data) {
 void VbAduioCodec::OutputData(std::vector<int16_t>& data) {
     Write(data.data(), data.size());
 }
+#endif
 
 void VbAduioCodec::SetOutputVolume(int volume){
     AudioCodec::SetOutputVolume(volume);
@@ -318,10 +334,10 @@ int VbAduioCodec::Write(const int16_t* data, int samples) {
     
     if (output_enabled_) {
         // ESP_LOGI(TAG, "write:%d %d ", samples, output_volume_);
-        while (rbuffer_available_size(play_buf) < 5*AUDIO_CHENK_LEN)
+        while (rbuffer_available_size(play_buf) < 5*AUDIO_RECV_CHENK_LEN)
         {
             // ESP_LOGW(TAG, "WAIT:%lu", rbuffer_available_size(play_buf));
-            vTaskDelay(pdTICKS_TO_MS(AUDIO_CHENK_MS));
+            vTaskDelay(pdTICKS_TO_MS(10));
         }
         uint32_t push_len = rbuffer_push(play_buf, (uint8_t *)data, 2*samples, 1);
     }

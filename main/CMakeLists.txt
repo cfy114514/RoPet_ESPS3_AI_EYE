@@ -5,6 +5,8 @@ set(SOURCES "audio_codecs/audio_codec.cc"
             "audio_codecs/es8388_audio_codec.cc"
             "audio_codecs/cores3_audio_codec.cc"
             "audio_codecs/tcircles3_audio_codec.cc"
+            "opus_codecs/opus_codec.cc"
+            "opus_codecs/no_opus_codec.cc"
             "led/single_led.cc"
             "led/circular_strip.cc"
             "display/display.cc"
@@ -23,7 +25,7 @@ set(SOURCES "audio_codecs/audio_codec.cc"
             "main.cc"
             )
 
-set(INCLUDE_DIRS "." "display" "audio_codecs" "protocols" "audio_processing")
+set(INCLUDE_DIRS "." "display" "audio_codecs" "opus_codecs" "protocols" "audio_processing")
 
 # 添加 IOT 相关文件
 file(GLOB IOT_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/iot/things/*.cc)
@@ -133,9 +135,12 @@ elseif(CONFIG_BOARD_TYPE_DOIT_ESP_VB6824)
                             "audio_codecs/cores3_audio_codec.cc"
                             "audio_codecs/tcircles3_audio_codec.cc")
 endif()
-
+if(CONFIG_BOARD_TYPE_DOIT_ESP_VB6824)
+# file(GLOB ASSETS ${CMAKE_CURRENT_SOURCE_DIR}/assets/zh_vb6824/*.p3)
 file(GLOB ASSETS ${CMAKE_CURRENT_SOURCE_DIR}/assets/zh/*.p3)
-
+else()
+file(GLOB ASSETS ${CMAKE_CURRENT_SOURCE_DIR}/assets/zh/*.p3)
+endif()
 idf_component_register(SRCS ${SOURCES}
                     EMBED_FILES ${ASSETS}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
