@@ -36,7 +36,7 @@ static const char* const STATE_STRINGS[] = {
 
 Application::Application() {
     event_group_ = xEventGroupCreate();
-#ifdef CONFIG_IDF_TARGET_ESP32C2
+#ifdef CONFIG_OPUS_CODEC_DISABLE_ESP_OPUS
     background_task_ = new BackgroundTask(2048);
 #else
     background_task_ = new BackgroundTask(4096 * 8);
@@ -322,7 +322,7 @@ void Application::Start() {
         Application* app = (Application*)arg;
         app->MainLoop();
         vTaskDelete(NULL);
-#ifdef CONFIG_IDF_TARGET_ESP32C2
+#ifdef CONFIG_OPUS_CODEC_DISABLE_ESP_OPUS
     }, "main_loop", 4096, this, 2, nullptr);
 #else
     }, "main_loop", 4096 * 2, this, 2, nullptr);

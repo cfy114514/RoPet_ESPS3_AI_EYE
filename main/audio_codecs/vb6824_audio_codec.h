@@ -47,8 +47,10 @@ public:
     virtual void OnOutputReady(std::function<bool()> callback) override;
     virtual void OnInputReady(std::function<bool()> callback) override;
     virtual void Start() override;
+#ifdef CONFIG_AUDIO_CODEC_VB6824_TYPE_OPUS_16K_20MS
     virtual void OutputData(std::vector<int16_t>& data) override;
     virtual bool InputData(std::vector<int16_t>& data) override;
+#endif
     virtual void EnableInput(bool enable) override; 
     virtual void EnableOutput(bool enable) override; 
 };

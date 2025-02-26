@@ -150,6 +150,25 @@ choice DISPLAY_LCD_TYPE
         bool "自定义屏幕参数"  
 endchoice
 
+choice AUDIO_CODEC_VB6824_TYPE
+    depends on BOARD_TYPE_DOIT_ESP_VB6824
+    prompt "Audio Codec VB6924 Type"
+    default AUDIO_CODEC_VB6824_TYPE_OPUS_16K_20MS if IDF_TARGET_ESP32C2
+    default AUDIO_CODEC_VB6824_TYPE_PCM_16K
+    help
+        VB6824支持的类型
+    config AUDIO_CODEC_VB6824_TYPE_PCM_16K
+        depends on !IDF_TARGET_ESP32C2
+        bool "PCM 16K"
+    config AUDIO_CODEC_VB6824_TYPE_OPUS_16K_20MS
+        bool "OPUS 16K 20ms"
+endchoice
+
+config OPUS_CODEC_DISABLE_ESP_OPUS
+    bool
+    default y
+    depends on AUDIO_CODEC_VB6824_TYPE_OPUS_16K_20MS
+
 config USE_AUDIO_PROCESSING
     bool "启用语音唤醒与音频处理"
     default y

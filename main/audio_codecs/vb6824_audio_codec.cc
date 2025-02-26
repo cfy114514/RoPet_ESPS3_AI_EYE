@@ -15,7 +15,9 @@ extern "C" {
 }
 #include "esp_log.h"
 
+#ifdef CONFIG_AUDIO_CODEC_VB6824_TYPE_OPUS_16K_20MS
 #define OPUS
+#endif
 
 static const char *TAG = "vb6824";
 
@@ -262,7 +264,7 @@ void VbAduioCodec::Start() {
 
     // uint8_t group = 0;
     // vb6824_send(VB6824_CMD_SEND_CTL, &group, 1);
-    SetOutputVolume(60);
+    SetOutputVolume(80);
 
     xTaskCreate([](void *arg){
         VbAduioCodec * this_ = (VbAduioCodec *)arg;

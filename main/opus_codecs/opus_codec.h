@@ -5,9 +5,13 @@
 #include <vector>
 #include <cstdint>
 
+#ifdef CONFIG_OPUS_CODEC_DISABLE_ESP_OPUS
+
+#else
 #include <opus_encoder.h>
 #include <opus_decoder.h>
 #include <opus_resampler.h>
+#endif
 
 class OpusCodec {
 public:
@@ -23,6 +27,9 @@ public:
     virtual void DecodeResetState();
 
 private:
+#ifdef CONFIG_OPUS_CODEC_DISABLE_ESP_OPUS
+
+#else
     int encode_sample_rate_;
     int decode_sample_rate_;
     OpusResampler input_resampler_;
@@ -32,6 +39,7 @@ private:
     int decode_resample_ = -1;
     std::unique_ptr<OpusEncoderWrapper> opus_encoder_;
     std::unique_ptr<OpusDecoderWrapper> opus_decoder_;
+#endif
 };
 
 #endif // _OPUS_DECODER_WRAPPER_H_

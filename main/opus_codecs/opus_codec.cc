@@ -19,10 +19,16 @@ OpusCodec::~OpusCodec() {
 }
 
 void OpusCodec::EncodeConfig(int sample_rate, int channels, int duration_ms){
+#ifdef CONFIG_OPUS_CODEC_DISABLE_ESP_OPUS  //屏蔽对opus的实现，减小固件体积
+
+#else
     if(opus_encoder_ != nullptr){
-        opus_encoder_.reset();
+        // opus_encoder_.reset() //使用reset释放后重新分配可能存在分配失败问题
+        // opus_encoder_ = std::make_unique<OpusEncoderWrapper>(sample_rate, channels, duration_ms);
+        opus_encoder_->Config(sample_rate, channels, duration_ms);
+    }else{
+        opus_encoder_ = std::make_unique<OpusEncoderWrapper>(sample_rate, channels, duration_ms);
     }
-    opus_encoder_ = std::make_unique<OpusEncoderWrapper>(sample_rate, channels, duration_ms);
 
 #ifdef CONFIG_IDF_TARGET_ESP32C3
     opus_encoder_->SetComplexity(3);
@@ -38,9 +44,13 @@ void OpusCodec::EncodeConfig(int sample_rate, int channels, int duration_ms){
 #endif
 
     encode_sample_rate_ = sample_rate;
+#endif
 }
 
 void OpusCodec::Encode(std::vector<int16_t>&& pcm, std::function<void(std::vector<uint8_t>&& opus)> handler, int resample) {
+#ifdef CONFIG_OPUS_CODEC_DISABLE_ESP_OPUS
+
+#else
     if(opus_encoder_ == nullptr){
         ESP_LOGI(TAG, "Encode not config");
         return;
@@ -77,27 +87,39 @@ void OpusCodec::Encode(std::vector<int16_t>&& pcm, std::function<void(std::vecto
     }
 
     opus_encoder_->Encode(std::move(pcm), handler);
+#endif
 }
 
 void OpusCodec::EncodeResetState(){
+#ifdef CONFIG_OPUS_CODEC_DISABLE_ESP_OPUS
+
+#else 
     if(opus_encoder_ == nullptr){
         ESP_LOGI(TAG, "Encode not config");
         return;
     }
     opus_encoder_->ResetState();
+#endif
 }
 
 void OpusCodec::DecodeConfig(int sample_rate, int channels, int duration_ms){
+#ifdef CONFIG_OPUS_CODEC_DISABLE_ESP_OPUS
+
+#else
     if(opus_decoder_ != nullptr){
         opus_decoder_.reset();
     }
     opus_decoder_ = std::make_unique<OpusDecoderWrapper>(sample_rate, channels, duration_ms);
 
     decode_sample_rate_ = sample_rate;
+#endif
 }
 
 
 bool OpusCodec::Decode(std::vector<uint8_t>&& opus, std::vector<int16_t>& pcm, int resample) {
+#ifdef CONFIG_OPUS_CODEC_DISABLE_ESP_OPUS
+    return false;
+#else
     if(opus_decoder_ == nullptr){
         ESP_LOGI(TAG, "Decode not config");
         return false;
@@ -117,14 +139,17 @@ bool OpusCodec::Decode(std::vector<uint8_t>&& opus, std::vector<int16_t>& pcm, i
         output_resampler_.Process(pcm.data(), pcm.size(), resampled.data());
         pcm = std::move(resampled);
     }
-
     return true;
+#endif
 }
 
 void OpusCodec::DecodeResetState() {
+#ifdef CONFIG_OPUS_CODEC_DISABLE_ESP_OPUS
+#else
     if(opus_decoder_ == nullptr){
         ESP_LOGI(TAG, "Decode not config");
         return;
     }
     opus_decoder_->ResetState();
+#endif
 }
