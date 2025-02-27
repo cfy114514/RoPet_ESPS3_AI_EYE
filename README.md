@@ -22,6 +22,11 @@
 
 
 ## 离线唤醒词
+### 唤醒词
+| 中文唤醒词           | 英文唤醒词         |
+| ------------------ | ---------------- |
+| 小艾小艾            | Hey Alice        |
+| 你好小智            |                  |
 
 ### 机器人
 
@@ -91,5 +96,7 @@
 技术支持微信：andy433928
 
 VB6824：https://item.taobao.com/item.htm?id=891592447743& 
+
+C2开发板：https://item.taobao.com/item.htm?id=688271301869
 
 C3开发板：https://item.taobao.com/item.htm?id=652593406663&skuId=5184792378516：
