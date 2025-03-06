@@ -26,7 +26,7 @@ static const char *TAG = "vb6824";
 #define UART_RX_BUFFER_SIZE  (MAX_UART_USER_LEN * 2)
 #define UART_TX_BUFFER_SIZE  (MAX_UART_USER_LEN * 2)
 
-#define UART_QUEUE_SIZE      128
+#define UART_QUEUE_SIZE      32
 
 #ifdef OPUS
 #define AUDIO_RECV_CHENK_LEN     40
@@ -34,11 +34,13 @@ static const char *TAG = "vb6824";
 #define AUDIO_SEND_CHENK_MS      20
 #else
 #define AUDIO_RECV_CHENK_LEN     512
-#define AUDIO_SEND_CHENK_LEN     480
-#define AUDIO_SEND_CHENK_MS      15
+// #define AUDIO_SEND_CHENK_LEN     480
+// #define AUDIO_SEND_CHENK_MS      15
+#define AUDIO_SEND_CHENK_LEN     320
+#define AUDIO_SEND_CHENK_MS      10
 #endif
-#define SEND_BUF_LENGTH         AUDIO_SEND_CHENK_LEN*20
-#define RECV_BUF_LENGTH         AUDIO_RECV_CHENK_LEN*20
+#define SEND_BUF_LENGTH         AUDIO_SEND_CHENK_LEN*28
+#define RECV_BUF_LENGTH         AUDIO_RECV_CHENK_LEN*15
 
 #define VB_PLAY_SAMPLE_RATE     16 * 1000
 #define VB_RECO_SAMPLE_RATE     16 * 1000
@@ -62,11 +64,14 @@ void VbAduioCodec::uart_event_task() {
             switch (event.type) {
                 case UART_DATA:{
                     // 尝试多次读取，直到本次事件里可读字节消耗完为止
-                    int len = uart_read_bytes(UART_API_UART_NUM, temp_buf, sizeof(temp_buf), 0);
-                    if (len > 0) {
-                        // ESP_LOGI(TAG, "UART read: %d", len);
-                        vb6824_parse(temp_buf, len);
-                    }
+                    int len = 0;
+                    do{
+                        len = uart_read_bytes(UART_API_UART_NUM, temp_buf, sizeof(temp_buf), 0);
+                        if (len > 0) {
+                            // ESP_LOGI(TAG, "UART read: %d", len);
+                            vb6824_parse(temp_buf, len);
+                        }
+                    }while (len);
                     }
                     break;
 
@@ -120,17 +125,6 @@ void VbAduioCodec::vb6824_recv_cb(vb6824_cmd_t cmd, uint8_t *data, uint16_t len)
         if (rbuffer_used_size(play_buf) < AUDIO_SEND_CHENK_LEN)
         {
             rbuffer_push(recv_buf, data, len, 1);
-#ifdef OPUS
-            if (rbuffer_used_size(recv_buf) >= 40)
-#else
-            if (rbuffer_used_size(recv_buf) >= 960)
-#endif
-            {
-                if (on_input_ready_)
-                {
-                    on_input_ready_();
-                }
-            }
         }
     }else if (cmd == VB6824_CMD_RECV_CTL)
     {
@@ -156,11 +150,17 @@ void VbAduioCodec::uart_init(gpio_num_t tx, gpio_num_t rx){
     uart_config.rx_flow_ctrl_thresh = 0;             // (若开启RTS则需要设置触发阈值)   
     // uart_config.source_clk = UART_SCLK_APB; // 使用 APB 时钟源
 
+    int intr_alloc_flags = 0;
+
+#if CONFIG_UART_ISR_IN_IRAM
+    intr_alloc_flags = ESP_INTR_FLAG_IRAM;
+#endif
+
     // 安装驱动，增大 rx_buffer_size
     uart_driver_install(UART_API_UART_NUM,
                         UART_RX_BUFFER_SIZE,
                         UART_TX_BUFFER_SIZE,
-                        UART_QUEUE_SIZE, &uartQueue, 0);
+                        UART_QUEUE_SIZE, &uartQueue, intr_alloc_flags);
 
     uart_param_config(UART_API_UART_NUM, &uart_config);
     uart_set_pin(UART_API_UART_NUM, tx, rx,
@@ -199,45 +199,46 @@ void VbAduioCodec::vb6824_send(vb6824_cmd_t cmd, uint8_t *data, uint16_t len){
         }
         packet[packet_len - 1] = checksum;
         uart_write_bytes(UART_API_UART_NUM, packet, packet_len);
-        uart_flush(UART_API_UART_NUM);
+        // uart_flush(UART_API_UART_NUM);
     }
 }
 
-void VbAduioCodec::send_thread() {
+void VbAduioCodec::vb_thread() {
     uint8_t playing = 0;
     uint8_t *data = (uint8_t *)malloc(sizeof(uint8_t)*AUDIO_SEND_CHENK_LEN);
     TickType_t xLastWakeTime = xTaskGetTickCount(); // 获取当前的 Tick 计数
-    while (1) {
-        if (rbuffer_used_size(play_buf) >= AUDIO_SEND_CHENK_LEN)
-        {
-#ifdef OPUS
-            if(playing == 0){
-                // ESP_LOGE(TAG, "start");
-                playing = 1;
-                uint8_t data1[1] = {1};
-                vb6824_send(VB6824_CMD_SEND_PCM_EOF, data1, sizeof(data1));
+    TickType_t xLastSendTime = xTaskGetTickCount(); // 获取当前的 Tick 计数
+    TickType_t xLastReadyTime = xTaskGetTickCount(); // 获取当前的 Tick 计数
+    while (1)
+    {
+        if(xLastWakeTime - xLastSendTime >= pdMS_TO_TICKS(AUDIO_SEND_CHENK_MS)){
+            xLastSendTime = xLastWakeTime;
+            if (rbuffer_used_size(play_buf) >= AUDIO_SEND_CHENK_LEN){
+                rbuffer_pop(play_buf, (void*)data, AUDIO_SEND_CHENK_LEN);
+                vb6824_send(VB6824_CMD_SEND_PCM, data, AUDIO_SEND_CHENK_LEN);
             }
+        }
+        if(xLastWakeTime - xLastReadyTime >= pdMS_TO_TICKS(5)){
+            xLastReadyTime = xLastWakeTime;
+            if (rbuffer_available_size(play_buf) > 10*AUDIO_RECV_CHENK_LEN){
+                if(on_output_ready_) on_output_ready_();
+            }
+#ifdef OPUS
+            if (rbuffer_used_size(recv_buf) >= 40) {
+#else
+            if (rbuffer_used_size(recv_buf) >= 2*960) {
 #endif
-            if(xTaskGetTickCount() - xLastWakeTime > pdMS_TO_TICKS(AUDIO_SEND_CHENK_MS)){
-                xLastWakeTime = xTaskGetTickCount();
-            }
-            rbuffer_pop(play_buf, (void*)data, AUDIO_SEND_CHENK_LEN);
-            vb6824_send(VB6824_CMD_SEND_PCM, data, AUDIO_SEND_CHENK_LEN);
-            if(on_output_ready_) on_output_ready_();
-            vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(AUDIO_SEND_CHENK_MS));
-        }else{
-#ifdef OPUS
-            if(playing == 1){
-                if(xTaskGetTickCount() - xLastWakeTime > pdMS_TO_TICKS(150)){
-                    // ESP_LOGE(TAG, "stop");
-                    playing = 0;
-                    uint8_t data1[1] = {0};
-                    vb6824_send(VB6824_CMD_SEND_PCM_EOF, data1, sizeof(data1));
+                if (on_input_ready_) {
+                    on_input_ready_();
                 }
             }
-#endif
-            if(on_output_ready_) {on_output_ready_();} else{ESP_LOGE(TAG, "SDF");}
-            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+        
+        TickType_t delay1 = (xLastSendTime + AUDIO_SEND_CHENK_MS) - xLastWakeTime;
+        TickType_t delay2 = (xLastReadyTime + 5) - xLastWakeTime;
+        TickType_t delay = delay1<delay2?delay1:delay2;
+        if(delay){
+            vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(delay));
         }
     }
 }
@@ -251,7 +252,7 @@ VbAduioCodec::VbAduioCodec(gpio_num_t tx, gpio_num_t rx) {
     output_sample_rate_ = VB_RECO_SAMPLE_RATE;
 
     frame_parser_init(FRAME_MAX_LEN*2);
-    
+
     ESP_LOGI(TAG, "VbAduioCodec initialized");
 }
 
@@ -268,9 +269,10 @@ void VbAduioCodec::Start() {
 
     xTaskCreate([](void *arg){
         VbAduioCodec * this_ = (VbAduioCodec *)arg;
-        this_->send_thread();
-    }, "play_thread", 2048 + 1024, this, 8, NULL);
+        this_->vb_thread();
+    }, "vb_thread", 3072, this, 8, NULL);
 }
+
 #ifdef OPUS
 bool VbAduioCodec::InputData(std::vector<int16_t>& data) {
     data.resize(20);
@@ -335,11 +337,8 @@ int VbAduioCodec::Read(int16_t* dest, int samples) {
 int VbAduioCodec::Write(const int16_t* data, int samples) {
     
     if (output_enabled_) {
-        // ESP_LOGI(TAG, "write:%d %d ", samples, output_volume_);
-        while (rbuffer_available_size(play_buf) < 5*AUDIO_RECV_CHENK_LEN)
-        {
-            // ESP_LOGW(TAG, "WAIT:%lu", rbuffer_available_size(play_buf));
-            vTaskDelay(pdTICKS_TO_MS(10));
+        while (rbuffer_available_size(play_buf) < 2*samples) {
+            vTaskDelay(pdTICKS_TO_MS(2));
         }
         uint32_t push_len = rbuffer_push(play_buf, (uint8_t *)data, 2*samples, 1);
     }

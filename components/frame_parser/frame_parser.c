@@ -39,7 +39,7 @@ bool frame_parser_get_frame(uint8_t *frame, uint32_t *len){
     while (rbuffer_used_size(g_rbuffer) >= FRAME_MIN_LEN)
     {
         frame_parser_head_t *head = NULL;
-        // frame_parser_last_t *last = NULL;
+        frame_parser_last_t *last = NULL;
         uint32_t try_len = 0;
         uint32_t try_index = 0;
         uint32_t remove_len = 0;
@@ -92,10 +92,18 @@ bool frame_parser_get_frame(uint8_t *frame, uint32_t *len){
         try_index += (sizeof(frame_parser_head_t) + FRAME_DATA_LEN(head));
 
         if(try_len >= sizeof(frame_parser_last_t)){
-            rbuffer_get_buffer(g_rbuffer, try_index, buf, sizeof(frame_parser_last_t));
-            // last = (frame_parser_last_t *)buf;
+            frame_len += sizeof(frame_parser_last_t);
+            if(frame_len > FRAME_MAX_LEN){
+                rbuffer_discard(g_rbuffer, 2);
+                return false;
+            }
+#ifdef FRAME_CHECK
+            rbuffer_get_buffer(g_rbuffer, start_index, buf, frame_len);
+            last = (frame_parser_last_t *)(buf + frame_len - sizeof(frame_parser_last_t));
+            if(FRAME_CHECK(head, last)){
+#else
             if(1){
-                frame_len += sizeof(frame_parser_last_t);
+#endif
                 rbuffer_get_buffer(g_rbuffer, start_index, frame, frame_len);
                 *len = frame_len;
                 rbuffer_discard(g_rbuffer, frame_len);

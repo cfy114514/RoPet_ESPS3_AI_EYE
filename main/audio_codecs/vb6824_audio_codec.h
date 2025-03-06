@@ -28,7 +28,7 @@ private:
     QueueHandle_t play_queue;
     QueueHandle_t uartQueue;
     
-    void send_thread();
+    void vb_thread();
     void uart_event_task();
     void uart_init(gpio_num_t tx, gpio_num_t rx);
     void vb6824_parse(uint8_t *data, uint16_t len);

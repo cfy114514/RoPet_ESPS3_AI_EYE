@@ -307,12 +307,20 @@ void Application::Start() {
 
     codec->OnInputReady([this, codec]() {
         BaseType_t higher_priority_task_woken = pdFALSE;
-        xEventGroupSetBitsFromISR(event_group_, AUDIO_INPUT_READY_EVENT, &higher_priority_task_woken);
+        if(xPortInIsrContext()){
+            xEventGroupSetBitsFromISR(event_group_, AUDIO_INPUT_READY_EVENT, &higher_priority_task_woken);
+        }else{
+            xEventGroupSetBits(event_group_, AUDIO_INPUT_READY_EVENT); 
+        }
         return higher_priority_task_woken == pdTRUE;
     });
     codec->OnOutputReady([this]() {
         BaseType_t higher_priority_task_woken = pdFALSE;
-        xEventGroupSetBitsFromISR(event_group_, AUDIO_OUTPUT_READY_EVENT, &higher_priority_task_woken);
+        if(xPortInIsrContext()){
+            xEventGroupSetBitsFromISR(event_group_, AUDIO_OUTPUT_READY_EVENT, &higher_priority_task_woken);
+        }else{
+            xEventGroupSetBits(event_group_, AUDIO_OUTPUT_READY_EVENT);  
+        }
         return higher_priority_task_woken == pdTRUE;
     });
     codec->Start();
@@ -341,6 +349,13 @@ void Application::Start() {
         Alert("ERROR", message, "sad");
     });
     protocol_->OnIncomingAudio([this](std::vector<uint8_t>&& data) {
+        if(device_state_ == kDeviceStateSpeaking && audio_decode_queue_.size() > 10){
+#ifdef CONFIG_OPUS_CODEC_DISABLE_ESP_OPUS
+            vTaskDelay(20 / portTICK_PERIOD_MS);
+#else
+            vTaskDelay(60 / portTICK_PERIOD_MS);
+#endif
+        }
         std::lock_guard<std::mutex> lock(mutex_);
         if (device_state_ == kDeviceStateSpeaking) {
             audio_decode_queue_.emplace_back(std::move(data));
@@ -550,43 +565,46 @@ void Application::OutputAudio() {
     auto codec = Board::GetInstance().GetAudioCodec();
     const int max_silence_seconds = 10;
 
-    std::unique_lock<std::mutex> lock(mutex_);
-    if (audio_decode_queue_.empty()) {
-        // Disable the output if there is no audio data for a long time
-        if (device_state_ == kDeviceStateIdle) {
-            auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - last_output_time_).count();
-            if (duration > max_silence_seconds) {
-                codec->EnableOutput(false);
+    std::unique_lock<std::mutex> lock(mutex_, std::defer_lock);
+    while(1){
+        lock.lock();
+        if (audio_decode_queue_.empty()) {
+            // Disable the output if there is no audio data for a long time
+            if (device_state_ == kDeviceStateIdle) {
+                auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - last_output_time_).count();
+                if (duration > max_silence_seconds) {
+                    codec->EnableOutput(false);
+                }
             }
-        }
-        return;
-    }
-
-    if (device_state_ == kDeviceStateListening) {
-        audio_decode_queue_.clear();
-        return;
-    }
-
-    last_output_time_ = now;
-    auto opus = std::move(audio_decode_queue_.front());
-    audio_decode_queue_.pop_front();
-    lock.unlock();
-
-    background_task_->Schedule([this, codec, opus = std::move(opus)]() mutable {
-        if (aborted_) {
             return;
         }
-        int resample = -1;
-        std::vector<int16_t> pcm; 
-        auto opus_codec = Board::GetInstance().GetOpusCodec();
-        if (opus_decode_sample_rate_ != codec->output_sample_rate()) {
-            resample = codec->output_sample_rate();
-        }
-        if (!opus_codec->Decode(std::move(opus), pcm, resample)) {
+
+        if (device_state_ == kDeviceStateListening) {
+            audio_decode_queue_.clear();
             return;
         }
-        codec->OutputData(pcm);
-    });
+
+        last_output_time_ = now;
+        auto opus = std::move(audio_decode_queue_.front());
+        audio_decode_queue_.pop_front();
+        lock.unlock();
+
+        background_task_->Schedule([this, codec, opus = std::move(opus)]() mutable {
+            if (aborted_) {
+                return;
+            }
+            int resample = -1;
+            std::vector<int16_t> pcm; 
+            auto opus_codec = Board::GetInstance().GetOpusCodec();
+            if (opus_decode_sample_rate_ != codec->output_sample_rate()) {
+                resample = codec->output_sample_rate();
+            }
+            if (!opus_codec->Decode(std::move(opus), pcm, resample)) {
+                return;
+            }
+            codec->OutputData(pcm);
+        });
+    }
 }
 
 void Application::InputAudio() {

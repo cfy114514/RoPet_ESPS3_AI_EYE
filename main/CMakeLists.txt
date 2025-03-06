@@ -105,6 +105,8 @@ elseif(CONFIG_BOARD_TYPE_XINGZHI_Cube_TFT)
     set(BOARD_TYPE "xingzhi-cube-tft")
 elseif(CONFIG_BOARD_TYPE_DOIT_ESP_VB6824)
     set(BOARD_TYPE "doit-esp-vb6824")
+elseif(CONFIG_BOARD_TYPE_DOIT_ESP_VB6824_LCD)
+    set(BOARD_TYPE "doit-esp-vb6824-lcd")
 endif()
 file(GLOB BOARD_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.cc)
 list(APPEND SOURCES ${BOARD_SOURCES})
@@ -125,7 +127,7 @@ if(CONFIG_IDF_TARGET_ESP32)
     list(REMOVE_ITEM SOURCES "audio_codecs/box_audio_codec.cc"
                              "audio_codecs/cores3_audio_codec.cc"
                              "audio_codecs/es8388_audio_codec.cc")
-elseif(CONFIG_BOARD_TYPE_DOIT_ESP_VB6824)
+elseif(CONFIG_BOARD_TYPE_DOIT_ESP_VB6824 OR CONFIG_BOARD_TYPE_DOIT_ESP_VB6824_LCD)
     list(APPEND SOURCES "audio_codecs/vb6824_audio_codec.cc")
     list(REMOVE_ITEM SOURCES "audio_codecs/box_audio_codec.cc"
                             "audio_codecs/no_audio_codec.cc"
