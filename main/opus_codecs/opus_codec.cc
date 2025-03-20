@@ -19,9 +19,7 @@ OpusCodec::~OpusCodec() {
 }
 
 void OpusCodec::EncodeConfig(int sample_rate, int channels, int duration_ms){
-#ifdef CONFIG_OPUS_CODEC_DISABLE_ESP_OPUS  //屏蔽对opus的实现，减小固件体积
-
-#else
+#ifdef CONFIG_OPUS_CODEC_TYPE_ESP_OPUS
     if(opus_encoder_ != nullptr){
         // opus_encoder_.reset() //使用reset释放后重新分配可能存在分配失败问题
         // opus_encoder_ = std::make_unique<OpusEncoderWrapper>(sample_rate, channels, duration_ms);
@@ -48,9 +46,7 @@ void OpusCodec::EncodeConfig(int sample_rate, int channels, int duration_ms){
 }
 
 void OpusCodec::Encode(std::vector<int16_t>&& pcm, std::function<void(std::vector<uint8_t>&& opus)> handler, int resample) {
-#ifdef CONFIG_OPUS_CODEC_DISABLE_ESP_OPUS
-
-#else
+#ifdef CONFIG_OPUS_CODEC_TYPE_ESP_OPUS
     if(opus_encoder_ == nullptr){
         ESP_LOGI(TAG, "Encode not config");
         return;
@@ -91,9 +87,7 @@ void OpusCodec::Encode(std::vector<int16_t>&& pcm, std::function<void(std::vecto
 }
 
 void OpusCodec::EncodeResetState(){
-#ifdef CONFIG_OPUS_CODEC_DISABLE_ESP_OPUS
-
-#else 
+#ifdef CONFIG_OPUS_CODEC_TYPE_ESP_OPUS 
     if(opus_encoder_ == nullptr){
         ESP_LOGI(TAG, "Encode not config");
         return;
@@ -103,9 +97,7 @@ void OpusCodec::EncodeResetState(){
 }
 
 void OpusCodec::DecodeConfig(int sample_rate, int channels, int duration_ms){
-#ifdef CONFIG_OPUS_CODEC_DISABLE_ESP_OPUS
-
-#else
+#ifdef CONFIG_OPUS_CODEC_TYPE_ESP_OPUS
     if(opus_decoder_ != nullptr){
         opus_decoder_.reset();
     }
@@ -117,9 +109,7 @@ void OpusCodec::DecodeConfig(int sample_rate, int channels, int duration_ms){
 
 
 bool OpusCodec::Decode(std::vector<uint8_t>&& opus, std::vector<int16_t>& pcm, int resample) {
-#ifdef CONFIG_OPUS_CODEC_DISABLE_ESP_OPUS
-    return false;
-#else
+#ifdef CONFIG_OPUS_CODEC_TYPE_ESP_OPUS
     if(opus_decoder_ == nullptr){
         ESP_LOGI(TAG, "Decode not config");
         return false;
@@ -140,12 +130,13 @@ bool OpusCodec::Decode(std::vector<uint8_t>&& opus, std::vector<int16_t>& pcm, i
         pcm = std::move(resampled);
     }
     return true;
+#else
+    return false;
 #endif
 }
 
 void OpusCodec::DecodeResetState() {
-#ifdef CONFIG_OPUS_CODEC_DISABLE_ESP_OPUS
-#else
+#ifdef CONFIG_OPUS_CODEC_TYPE_ESP_OPUS
     if(opus_decoder_ == nullptr){
         ESP_LOGI(TAG, "Decode not config");
         return;

@@ -9,3 +9,4 @@ dependencies.lock
 .env
 .DS_Store
 releases/
+.cache/

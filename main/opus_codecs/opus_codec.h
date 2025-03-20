@@ -5,9 +5,7 @@
 #include <vector>
 #include <cstdint>
 
-#ifdef CONFIG_OPUS_CODEC_DISABLE_ESP_OPUS
-
-#else
+#ifdef CONFIG_OPUS_CODEC_TYPE_ESP_OPUS
 #include <opus_encoder.h>
 #include <opus_decoder.h>
 #include <opus_resampler.h>
@@ -27,9 +25,7 @@ public:
     virtual void DecodeResetState();
 
 private:
-#ifdef CONFIG_OPUS_CODEC_DISABLE_ESP_OPUS
-
-#else
+#ifdef CONFIG_OPUS_CODEC_TYPE_ESP_OPUS
     int encode_sample_rate_;
     int decode_sample_rate_;
     OpusResampler input_resampler_;

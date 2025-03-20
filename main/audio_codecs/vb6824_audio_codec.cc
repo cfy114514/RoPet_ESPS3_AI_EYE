@@ -15,10 +15,6 @@ extern "C" {
 }
 #include "esp_log.h"
 
-#ifdef CONFIG_AUDIO_CODEC_VB6824_TYPE_OPUS_16K_20MS
-#define OPUS
-#endif
-
 static const char *TAG = "vb6824";
 
 #define UART_API_UART_NUM    UART_NUM_1
@@ -28,10 +24,14 @@ static const char *TAG = "vb6824";
 
 #define UART_QUEUE_SIZE      32
 
-#ifdef OPUS
+#if defined(CONFIG_AUDIO_CODEC_VB6824_TYPE_OPUS_16K_20MS)
 #define AUDIO_RECV_CHENK_LEN     40
 #define AUDIO_SEND_CHENK_LEN     40
 #define AUDIO_SEND_CHENK_MS      20
+#elif defined(CONFIG_AUDIO_CODEC_VB6824_TYPE_OPUS_16K_20MS_PCM_16K)
+#define AUDIO_RECV_CHENK_LEN     40
+#define AUDIO_SEND_CHENK_LEN     320
+#define AUDIO_SEND_CHENK_MS      10
 #else
 #define AUDIO_RECV_CHENK_LEN     512
 // #define AUDIO_SEND_CHENK_LEN     480
@@ -39,6 +39,7 @@ static const char *TAG = "vb6824";
 #define AUDIO_SEND_CHENK_LEN     320
 #define AUDIO_SEND_CHENK_MS      10
 #endif
+
 #define SEND_BUF_LENGTH         AUDIO_SEND_CHENK_LEN*28
 #define RECV_BUF_LENGTH         AUDIO_RECV_CHENK_LEN*15
 
@@ -99,7 +100,7 @@ void VbAduioCodec::uart_event_task() {
     vTaskDelete(NULL);
 }
 
-void VbAduioCodec::OnWakeUp(std::function<void()> callback) {
+void VbAduioCodec::OnWakeUp(std::function<void(std::string)> callback) {
     on_wake_up_ = callback;
 }
 
@@ -128,10 +129,10 @@ void VbAduioCodec::vb6824_recv_cb(vb6824_cmd_t cmd, uint8_t *data, uint16_t len)
         }
     }else if (cmd == VB6824_CMD_RECV_CTL)
     {
-        if(strncmp("你好小智", (char*)data, len) == 0 || strncmp("小艾小艾", (char*)data, len) == 0){
-            std::string str_data(reinterpret_cast<char*>(data), len);
+        if(strncmp("你好小智", (char*)data, len) == 0 || strncmp("开始配网", (char*)data, len) == 0){
+            std::string command(reinterpret_cast<char*>(data), len);
             if (on_wake_up_) {
-                on_wake_up_();
+                on_wake_up_(command);
             }
         }
         ESP_LOGI(TAG, "vb6824_recv cmd: %04x, len: %d :%.*s", cmd, len, len, data);
@@ -171,7 +172,11 @@ void VbAduioCodec::uart_init(gpio_num_t tx, gpio_num_t rx){
         [](void* arg) {
         auto this_ = (VbAduioCodec*)arg;
         this_->uart_event_task();
+#ifdef CONFIG_IDF_TARGET_ESP32C2
+        }, "uart_event_task", 3072, this, 7, NULL);
+#else
         }, "uart_event_task", 4096, this, 7, NULL);
+#endif
 }
 
 void VbAduioCodec::vb6824_send(vb6824_cmd_t cmd, uint8_t *data, uint16_t len){
@@ -223,10 +228,10 @@ void VbAduioCodec::vb_thread() {
             if (rbuffer_available_size(play_buf) > 10*AUDIO_RECV_CHENK_LEN){
                 if(on_output_ready_) on_output_ready_();
             }
-#ifdef OPUS
-            if (rbuffer_used_size(recv_buf) >= 40) {
-#else
+#ifdef CONFIG_AUDIO_CODEC_VB6824_TYPE_PCM_16K
             if (rbuffer_used_size(recv_buf) >= 2*960) {
+#else
+            if (rbuffer_used_size(recv_buf) >= 40) {
 #endif
                 if (on_input_ready_) {
                     on_input_ready_();
@@ -270,10 +275,10 @@ void VbAduioCodec::Start() {
     xTaskCreate([](void *arg){
         VbAduioCodec * this_ = (VbAduioCodec *)arg;
         this_->vb_thread();
-    }, "vb_thread", 3072, this, 8, NULL);
+    }, "vb_thread", 2048, this, 8, NULL);
 }
 
-#ifdef OPUS
+#ifndef CONFIG_AUDIO_CODEC_VB6824_TYPE_PCM_16K
 bool VbAduioCodec::InputData(std::vector<int16_t>& data) {
     data.resize(20);
     int samples = Read(data.data(), data.size());
