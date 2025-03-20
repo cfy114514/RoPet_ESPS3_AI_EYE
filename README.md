@@ -59,16 +59,11 @@
 | ------------------ | ---------------- |
 | 小艾小艾            | Hey Alice        |
 | 你好小智            |                  |
-=======
-- Cursor 或 VSCode
-- 安装 ESP-IDF 插件，选择 SDK 版本 5.3 或以上
-- Linux 比 Windows 更好，编译速度快，也免去驱动问题的困扰
-- 使用 Google C++ 代码风格，提交代码时请确保符合规范
->>>>>>> main
+|||
+
 
 ### 机器人
 
-<<<<<<< HEAD
 | 中文指令           | 英文指令         |
 | ------------------ | ---------------- |
 | 再见/不聊了        | Peace out        |
@@ -112,20 +107,7 @@
 | 橙色灯光 | Orange Light         |
 | 青色灯光 | Cyan Light           |
 | 紫色灯光 | Purple Light         |
-=======
-## 智能体配置
-
-如果你已经拥有一个小智 AI 聊天机器人设备，可以登录 [xiaozhi.me](https://xiaozhi.me) 控制台进行配置。
-
-👉 [后台操作视频教程（旧版界面）](https://www.bilibili.com/video/BV1jUCUY2EKM/)
-
-## 技术原理与私有化部署
-
-👉 [一份详细的 WebSocket 通信协议文档](docs/websocket.md)
-
-在个人电脑上部署服务器，可以参考另一位作者同样以 MIT 许可证开源的项目 [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server)
->>>>>>> main
-
+|||
 ### 音乐
 
 | 中文指令 | 英文指令      |
