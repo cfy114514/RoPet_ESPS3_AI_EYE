@@ -129,4 +129,5 @@
 
 技术支持微信：andy433928
 
-购买链接：https://item.taobao.com/item.htm?id=901004417223
+模组购买链接：https://item.taobao.com/item.htm?id=901004417223
+开发板购买链接：https://item.taobao.com/item.htm?ft=t&id=903237380382
