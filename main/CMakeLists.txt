@@ -79,6 +79,8 @@ elseif(CONFIG_BOARD_TYPE_ATOMS3_ECHO_BASE)
     set(BOARD_TYPE "atoms3-echo-base")
 elseif(CONFIG_BOARD_TYPE_ATOMS3R_ECHO_BASE)
     set(BOARD_TYPE "atoms3r-echo-base")
+elseif(CONFIG_BOARD_TYPE_ATOMS3R_CAM_M12_ECHO_BASE)
+    set(BOARD_TYPE "atoms3r-cam-m12-echo-base")
 elseif(CONFIG_BOARD_TYPE_ATOMMATRIX_ECHO_BASE)
     set(BOARD_TYPE "atommatrix-echo-base")
 elseif(CONFIG_BOARD_TYPE_XMINI_C3)
@@ -172,7 +174,7 @@ if(CONFIG_IDF_TARGET_ESP32)
                              "audio_codecs/es8388_audio_codec.cc"
                              "led/gpio_led.cc"
                              )
-elseif(CONFIG_BOARD_TYPE_DOIT_AI_01_KIT OR CONFIG_BOARD_TYPE_DOIT_AI_01_KIT_LCD)
+elseif(CONFIG_BOARD_TYPE_DOIT_AI_01_KIT OR CONFIG_BOARD_TYPE_DOIT_AI_01_KIT_LCD OR CONFIG_BOARD_TYPE_DOIT_AI_01_KIT_LCD_REMOTE)
     list(APPEND SOURCES "audio_codecs/vb6824_audio_codec.cc" 
                         "opus_codecs/no_opus_codec.cc"
                         "opus_codecs/only_dec_opus_code.cc")

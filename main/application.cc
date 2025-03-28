@@ -367,9 +367,9 @@ void Application::Start() {
         app->MainLoop();
         vTaskDelete(NULL);
 #ifdef CONFIG_IDF_TARGET_ESP32C2
-    }, "main_loop", 4096, this, 2, nullptr);
+    }, "main_loop", 4096, this, 4, nullptr);
 #else
-    }, "main_loop", 4096 * 2, this, 2, nullptr);
+    }, "main_loop", 4096 * 2, this, 4, nullptr);
 #endif
     /* Wait for the network to be ready */
     board.StartNetwork();
@@ -504,13 +504,9 @@ void Application::Start() {
             });
         });
     });
-#endif
-
-#if CONFIG_USE_WAKE_WORD_DETECT
-    wake_word_detect_.Initialize(codec->input_channels(), codec->input_reference());
-    wake_word_detect_.OnVadStateChange([this](bool speaking) {
-        Schedule([this, speaking]() {
-            if (device_state_ == kDeviceStateListening) {
+    audio_processor_.OnVadStateChange([this](bool speaking) {
+        if (device_state_ == kDeviceStateListening) {
+            Schedule([this, speaking]() {
                 if (speaking) {
                     voice_detected_ = true;
                 } else {
@@ -518,10 +514,13 @@ void Application::Start() {
                 }
                 auto led = Board::GetInstance().GetLed();
                 led->OnStateChanged();
-            }
-        });
+            });
+        }
     });
+#endif
 
+#if CONFIG_USE_WAKE_WORD_DETECT
+    wake_word_detect_.Initialize(codec->input_channels(), codec->input_reference());
     wake_word_detect_.OnWakeWordDetected([this](const std::string& wake_word) {
         Schedule([this, &wake_word]() {
             if (device_state_ == kDeviceStateIdle) {
@@ -548,9 +547,6 @@ void Application::Start() {
             } else if (device_state_ == kDeviceStateActivating) {
                 SetDeviceState(kDeviceStateIdle);
             }
-
-            // Resume detection
-            wake_word_detect_.StartDetection();
         });
     });
     wake_word_detect_.StartDetection();
@@ -633,45 +629,44 @@ void Application::OutputAudio() {
     const int max_silence_seconds = 10;
 
     std::unique_lock<std::mutex> lock(mutex_, std::defer_lock);
-    while(1){
-        lock.lock();
-        if (audio_decode_queue_.empty()) {
-            // Disable the output if there is no audio data for a long time
-            if (device_state_ == kDeviceStateIdle) {
-                auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - last_output_time_).count();
-                if (duration > max_silence_seconds) {
-                    codec->EnableOutput(false);
-                }
+
+    lock.lock();
+    if (audio_decode_queue_.empty()) {
+        // Disable the output if there is no audio data for a long time
+        if (device_state_ == kDeviceStateIdle) {
+            auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - last_output_time_).count();
+            if (duration > max_silence_seconds) {
+                codec->EnableOutput(false);
             }
-            return;
         }
-
-        if (device_state_ == kDeviceStateListening) {
-            audio_decode_queue_.clear();
-            return;
-        }
-
-        last_output_time_ = now;
-        auto opus = std::move(audio_decode_queue_.front());
-        audio_decode_queue_.pop_front();
-        lock.unlock();
-
-        background_task_->Schedule([this, codec, opus = std::move(opus)]() mutable {
-            if (aborted_) {
-                return;
-            }
-            int resample = -1;
-            std::vector<int16_t> pcm; 
-            auto opus_codec = Board::GetInstance().GetOpusCodec();
-            if (opus_decode_sample_rate_ != codec->output_sample_rate()) {
-                resample = codec->output_sample_rate();
-            }
-            if (!opus_codec->Decode(std::move(opus), pcm, resample)) {
-                return;
-            }
-            codec->OutputData(pcm);
-        });
+        return;
     }
+
+    if (device_state_ == kDeviceStateListening) {
+        audio_decode_queue_.clear();
+        return;
+    }
+
+    last_output_time_ = now;
+    auto opus = std::move(audio_decode_queue_.front());
+    audio_decode_queue_.pop_front();
+    lock.unlock();
+
+    background_task_->Schedule([this, codec, opus = std::move(opus)]() mutable {
+        if (aborted_) {
+            return;
+        }
+        int resample = -1;
+        std::vector<int16_t> pcm; 
+        auto opus_codec = Board::GetInstance().GetOpusCodec();
+        if (opus_decode_sample_rate_ != codec->output_sample_rate()) {
+            resample = codec->output_sample_rate();
+        }
+        if (!opus_codec->Decode(std::move(opus), pcm, resample)) {
+            return;
+        }
+        codec->OutputData(pcm);
+    });
 }
 
 void Application::InputAudio() {
@@ -770,6 +765,9 @@ void Application::SetDeviceState(DeviceState state) {
 #if CONFIG_USE_AUDIO_PROCESSOR
             audio_processor_.Stop();
 #endif
+#if CONFIG_USE_WAKE_WORD_DETECT
+            wake_word_detect_.StartDetection();
+#endif
             break;
         case kDeviceStateConnecting:
             display->SetStatus(Lang::Strings::CONNECTING);
@@ -784,6 +782,9 @@ void Application::SetDeviceState(DeviceState state) {
 #if CONFIG_USE_AUDIO_PROCESSOR
             audio_processor_.Start();
 #endif
+#if CONFIG_USE_WAKE_WORD_DETECT
+            wake_word_detect_.StopDetection();
+#endif
             UpdateIotStates();
             if (previous_state == kDeviceStateSpeaking) {
                 // FIXME: Wait for the speaker to empty the buffer
@@ -796,6 +797,9 @@ void Application::SetDeviceState(DeviceState state) {
             codec->EnableOutput(true);
 #if CONFIG_USE_AUDIO_PROCESSOR
             audio_processor_.Stop();
+#endif
+#if CONFIG_USE_WAKE_WORD_DETECT
+            wake_word_detect_.StartDetection();
 #endif
             break;
         default:
