@@ -45,6 +45,16 @@
 - 支持 LCD 显示图片表情
 - 支持多语言（中文、英文）
 
+## 软件部分
+* ESP-IDF需要在5.3以上，推荐版本为5.3，参考[官方指南](https://docs.espressif.com/projects/esp-idf/zh_CN/latest/esp32c2/get-started/index.html)
+* 编译
+    ```
+    idf.py @main/boards/doit-ai-01-kit/boards.cfg build
+    or
+    idf.py set-target esp32c2
+    idf.py build
+    ```
+    
 ## 硬件部分
 
 ![模组实物](docs/模组实物图.png)
