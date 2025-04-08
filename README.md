@@ -49,9 +49,12 @@
 * ESP-IDF需要在5.3以上，推荐版本为5.3，参考[官方指南](https://docs.espressif.com/projects/esp-idf/zh_CN/latest/esp32c2/get-started/index.html)
 * 编译
     ```
-    idf.py @main/boards/doit-ai-01-kit/boards.cfg build
+    idf.py @main/boards/doit-ai-01-kit/boards.cfg build    
     or
     idf.py set-target esp32c2
+    idf.py menuconfig
+    // Xiaozhi Assistant ---> Connection Type ---> Websocket    
+    // Xiaozhi Assistant ---> Board Type ---> Doit-AI-01-Kit    
     idf.py build
     ```
 
@@ -89,9 +92,8 @@
 ### 唤醒词
 | 中文唤醒词           | 英文唤醒词         |
 | ------------------ | ---------------- |
-| 小艾小艾            | Hey Alice        |
 | 你好小智            |                  |
-|||
+| 小艾小艾(需升级支持) | Hey Alice(需升级支持) |
 
 
 ### 机器人
