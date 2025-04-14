@@ -70,6 +70,7 @@ void VbAduioCodec::EnableInput(bool enable) {
     if (enable == input_enabled_) {
         return;
     }
+    vb6824_audio_enable_input(enable);
     input_enabled_ = enable;
     ESP_LOGI(TAG, "Set input enable to %s", enable ? "true" : "false");
 }
@@ -78,6 +79,7 @@ void VbAduioCodec::EnableOutput(bool enable) {
     if (enable == output_enabled_) {
         return;
     }
+    vb6824_audio_enable_output(enable);
     output_enabled_ = enable;
     ESP_LOGI(TAG, "Set output enable to %s", enable ? "true" : "false");
 }
@@ -111,5 +113,12 @@ int VbAduioCodec::Write(uint8_t* opus, int samples) {
     }
     vb6824_audio_write((uint8_t *)data, samples);
     return samples;
+}
+
+bool ConfigDecode(int sample_rate, int channels, int duration_ms) {
+    input_sample_rate_ = sample_rate;
+    input_channels_ = channels;
+    duration_ms_ = duration_ms;
+    return true;
 }
 #endif
