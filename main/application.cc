@@ -92,6 +92,11 @@ void Application::CheckNewVersion() {
                 ESP_LOGE(TAG, "Too many retries, exit version check");
                 return;
             }
+
+            char buffer[128];
+            snprintf(buffer, sizeof(buffer), Lang::Strings::CHECK_NEW_VERSION_FAILED, retry_delay, ota_.GetCheckVersionUrl().c_str());
+            Alert(Lang::Strings::ERROR, buffer, "sad", Lang::Sounds::P3_EXCLAMATION);
+
             ESP_LOGW(TAG, "Check new version failed, retry in %d seconds (%d/%d)", retry_delay, retry_count, MAX_RETRY);
             for (int i = 0; i < retry_delay; i++) {
                 vTaskDelay(pdMS_TO_TICKS(1000));
@@ -387,7 +392,11 @@ void Application::Start() {
     }, "audio_loop", 2048, this, 8, &audio_loop_task_handle_, 0);
     // }, "audio_loop", 1024, this, 8, &audio_loop_task_handle_, 0);
 #else
+#ifdef CONFIG_IDF_TARGET_ESP32C3
+    }, "audio_loop", 4096 * 2, this, 8, &audio_loop_task_handle_, 0);
+#else
     }, "audio_loop", 4096 * 2, this, 8, &audio_loop_task_handle_, realtime_chat_enabled_ ? 1 : 0);
+#endif
 #endif
 
     /* Wait for the network to be ready */
@@ -398,11 +407,16 @@ void Application::Start() {
 
     // Initialize the protocol
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
-#ifdef CONFIG_CONNECTION_TYPE_WEBSOCKET
-    protocol_ = std::make_unique<WebsocketProtocol>();
-#else
-    protocol_ = std::make_unique<MqttProtocol>();
-#endif
+
+    if (ota_.HasMqttConfig()) {
+        protocol_ = std::make_unique<MqttProtocol>();
+    } else if (ota_.HasWebsocketConfig()) {
+        protocol_ = std::make_unique<WebsocketProtocol>();
+    } else {
+        ESP_LOGW(TAG, "No protocol specified in the OTA config, using MQTT");
+        protocol_ = std::make_unique<MqttProtocol>();
+    }
+
     protocol_->OnNetworkError([this](const std::string& message) {
         SetDeviceState(kDeviceStateIdle);
         Alert(Lang::Strings::ERROR, message.c_str(), "sad", Lang::Sounds::P3_EXCLAMATION);
@@ -516,7 +530,7 @@ void Application::Start() {
             }
         }
     });
-    protocol_->Start();
+    bool protocol_started = protocol_->Start();
 
 #if CONFIG_USE_AUDIO_PROCESSOR
     audio_processor_.Initialize(codec, realtime_chat_enabled_);
@@ -555,7 +569,7 @@ void Application::Start() {
                 SetDeviceState(kDeviceStateConnecting);
                 wake_word_detect_.EncodeWakeWordData();
 
-                if (!protocol_->OpenAudioChannel()) {
+                if (!protocol_ || !protocol_->OpenAudioChannel()) {
                     wake_word_detect_.StartDetection();
                     return;
                 }
@@ -582,12 +596,15 @@ void Application::Start() {
     // Wait for the new version check to finish
     xEventGroupWaitBits(event_group_, CHECK_NEW_VERSION_DONE_EVENT, pdTRUE, pdFALSE, portMAX_DELAY);
     SetDeviceState(kDeviceStateIdle);
-    std::string message = std::string(Lang::Strings::VERSION) + ota_.GetCurrentVersion();
-    display->ShowNotification(message.c_str());
-    display->SetChatMessage("system", "");
-    // Play the success sound to indicate the device is ready
-    ResetDecoder();
-    PlaySound(Lang::Sounds::P3_SUCCESS);
+
+    if (protocol_started) {
+        std::string message = std::string(Lang::Strings::VERSION) + ota_.GetCurrentVersion();
+        display->ShowNotification(message.c_str());
+        display->SetChatMessage("system", "");
+        // Play the success sound to indicate the device is ready
+        ResetDecoder();
+        PlaySound(Lang::Sounds::P3_SUCCESS);
+    }
     
     // Enter the main event loop
     MainEventLoop();
@@ -701,7 +718,7 @@ void Application::OnAudioOutput() {
     audio_decode_cv_.notify_all();
 
     int free_sram = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-    if(free_sram < 5000){
+    if(free_sram < 10000){
         return;
     }
 
@@ -747,9 +764,13 @@ void Application::OnAudioInput() {
         }
     }
 #else
+#if CONFIG_USE_REALTIME_CHAT
+    if (device_state_ == kDeviceStateListening || realtime_chat_is_start_) {
+#else
     if (device_state_ == kDeviceStateListening) {
+#endif
         int free_sram = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-        if(free_sram < 5000){
+        if(free_sram < 10000){
             return;
         }
         
@@ -886,6 +907,9 @@ void Application::SetDeviceState(DeviceState state) {
 #if CONFIG_USE_WAKE_WORD_DETECT
             wake_word_detect_.StartDetection();
 #endif
+#if CONFIG_USE_REALTIME_CHAT
+            realtime_chat_is_start_ = false;
+#endif
             break;
         case kDeviceStateConnecting:
             display->SetStatus(Lang::Strings::CONNECTING);
@@ -904,6 +928,11 @@ void Application::SetDeviceState(DeviceState state) {
             if (!audio_processor_.IsRunning()) {
 #else
             if (true) {
+#if CONFIG_USE_REALTIME_CHAT
+                if(realtime_chat_is_start_){
+                    break;
+                }
+#endif
 #endif
                 // Send the start listening command
                 protocol_->SendStartListening(listening_mode_);
@@ -921,6 +950,9 @@ void Application::SetDeviceState(DeviceState state) {
 #if CONFIG_USE_AUDIO_PROCESSOR
                 audio_processor_.Start();
 #endif
+#if CONFIG_USE_REALTIME_CHAT
+                realtime_chat_is_start_ = true;
+#endif
             }
             break;
         case kDeviceStateSpeaking:
@@ -932,6 +964,9 @@ void Application::SetDeviceState(DeviceState state) {
 #endif
 #if CONFIG_USE_WAKE_WORD_DETECT
                 wake_word_detect_.StartDetection();
+#endif
+#if CONFIG_USE_REALTIME_CHAT
+                realtime_chat_is_start_ = false;
 #endif
             }
             ResetDecoder();
