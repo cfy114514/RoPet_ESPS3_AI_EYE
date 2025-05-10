@@ -38,18 +38,7 @@ static const char* const STATE_STRINGS[] = {
 
 Application::Application() {
     event_group_ = xEventGroupCreate();
-#if (defined(CONFIG_IDF_TARGET_ESP32C2) || defined(CONFIG_IDF_TARGET_ESP32C3))
-#if (defined(CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS) && defined(CONFIG_USE_AUDIO_CODEC_DECODE_OPUS))
-    background_task_ = new BackgroundTask(2048);
-#elif (defined(CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS))
-    background_task_ = new BackgroundTask(4096 * 2 + 768);
-    // background_task_ = new BackgroundTask(4096 * 2 + 512);
-#else
-    background_task_ = new BackgroundTask(4096 * 6 + 2048);
-#endif
-#else
-    background_task_ = new BackgroundTask(4096 * 8);
-#endif
+    background_task_ = new BackgroundTask(CONFIG_TACKGROUND_TASK_STACK_SIZE);
 
     esp_timer_create_args_t clock_timer_args = {
         .callback = [](void* arg) {
@@ -388,15 +377,10 @@ void Application::Start() {
         Application* app = (Application*)arg;
         app->AudioLoop();
         vTaskDelete(NULL);
-#ifdef CONFIG_IDF_TARGET_ESP32C2
-    }, "audio_loop", 2048, this, 8, &audio_loop_task_handle_, 0);
-    // }, "audio_loop", 1024, this, 8, &audio_loop_task_handle_, 0);
+#if defined(CONFIG_IDF_TARGET_ESP32C2) || defined(CONFIG_IDF_TARGET_ESP32C3)
+    }, "audio_loop", CONFIG_AUDIO_LOOP_TASK_STACK_SIZE, this, 8, &audio_loop_task_handle_, 0);
 #else
-#ifdef CONFIG_IDF_TARGET_ESP32C3
-    }, "audio_loop", 4096 * 2, this, 8, &audio_loop_task_handle_, 0);
-#else
-    }, "audio_loop", 4096 * 2, this, 8, &audio_loop_task_handle_, realtime_chat_enabled_ ? 1 : 0);
-#endif
+    }, "audio_loop", CONFIG_AUDIO_LOOP_TASK_STACK_SIZE, this, 8, &audio_loop_task_handle_, realtime_chat_enabled_ ? 1 : 0);
 #endif
 
     /* Wait for the network to be ready */
@@ -791,7 +775,10 @@ void Application::OnAudioInput() {
             }
             opus_encoder_->Encode(std::move(data), [this](std::vector<uint8_t>&& opus) {
                 Schedule([this, opus = std::move(opus)]() {
-                    protocol_->SendAudio(opus);
+                    if (protocol_ != nullptr)
+                    {
+                        protocol_->SendAudio(opus);
+                    }
                 });
             });
         });
@@ -1059,3 +1046,91 @@ bool Application::CanEnterSleepMode() {
     // Now it is safe to enter sleep mode
     return true;
 }
+
+#if defined(CONFIG_VB6824_OTA_SUPPORT) && CONFIG_VB6824_OTA_SUPPORT == 1
+void Application::ReleaseDecoder() {
+    ESP_LOGW(TAG, "Release decoder");
+    while (!audio_decode_queue_.empty())
+    {  
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    vTaskDelete(audio_loop_task_handle_);
+    audio_loop_task_handle_ = nullptr;
+    background_task_->WaitForCompletion();
+    background_task_->WaitForCompletion();
+    delete background_task_;
+    background_task_ = nullptr;
+    opus_decoder_.reset();
+    ESP_LOGW(TAG, "Decoder released DONE");
+}
+
+
+void Application::ShowOtaInfo(const std::string& code,const std::string& ip) {
+    Schedule([this]() {
+        if(device_state_ != kDeviceStateActivating && device_state_ != kDeviceStateIdle && protocol_ != nullptr) {
+            protocol_->CloseAudioChannel();
+        }
+    });
+    vTaskDelay(pdMS_TO_TICKS(600));
+    if (device_state_ != kDeviceStateIdle) {
+        ESP_LOGW(TAG, "ShowOtaInfo, device_state_:%s != kDeviceStateIdle", STATE_STRINGS[device_state_]);
+        background_task_->Schedule([this, code, ip](){
+            this->ShowOtaInfo(code, ip);
+        });
+        return;
+    }
+    if(protocol_ != nullptr) {    
+        Schedule([this]() {
+            protocol_.reset();
+            protocol_ = nullptr;
+            
+        });
+        vTaskDelay(pdMS_TO_TICKS(100));
+        background_task_->Schedule([this, code, ip](){
+            this->ShowOtaInfo(code, ip);
+        });
+        return;
+    }
+    
+    ResetDecoder();
+    ESP_LOGW(TAG,"DEV CODE:%s ip:%s", code.c_str(), ip.c_str());
+    struct digit_sound {
+        char digit;
+        const std::string_view& sound;
+    };
+    static const std::array<digit_sound, 10> digit_sounds{{
+        digit_sound{'0', Lang::Sounds::P3_0},
+        digit_sound{'1', Lang::Sounds::P3_1}, 
+        digit_sound{'2', Lang::Sounds::P3_2},
+        digit_sound{'3', Lang::Sounds::P3_3},
+        digit_sound{'4', Lang::Sounds::P3_4},
+        digit_sound{'5', Lang::Sounds::P3_5},
+        digit_sound{'6', Lang::Sounds::P3_6},
+        digit_sound{'7', Lang::Sounds::P3_7},
+        digit_sound{'8', Lang::Sounds::P3_8},
+        digit_sound{'9', Lang::Sounds::P3_9}
+    }};
+
+    Schedule([this,code,ip](){
+        auto display = Board::GetInstance().GetDisplay();
+        std::string message;
+        if (ip.empty()) {
+            message = "浏览器访问\nhttp://vbota.esp32.cn/vbota\n设备码:"+code;
+        } else {
+            message = "浏览器访问\nhttp://vbota.esp32.cn/vbota\n或\nhttp://"+ip+"\n设备码:"+code;
+        }
+        
+        display->SetStatus("升级模式");
+        display->SetChatMessage("system", message.c_str());
+        PlaySound(Lang::Sounds::P3_START_OTA);
+        for (const auto& digit : code) {
+            auto it = std::find_if(digit_sounds.begin(), digit_sounds.end(),
+                [digit](const digit_sound& ds) { return ds.digit == digit; });
+            if (it != digit_sounds.end()) {
+                PlaySound(it->sound);
+            }
+        }
+    });
+}
+#endif
