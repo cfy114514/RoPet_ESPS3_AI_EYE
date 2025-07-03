@@ -28,6 +28,15 @@ protected:
     esp_lcd_panel_io_handle_t panel_io_ = nullptr;
     esp_lcd_panel_handle_t panel_ = nullptr;
     
+    #if CONFIG_BOARD_TYPE_DOIT_ESP32S3_EYE_8311
+        esp_lcd_panel_io_handle_t panel_io_2 = nullptr;
+        esp_lcd_panel_handle_t panel_2 = nullptr;
+    #endif
+
+    #if CONFIG_USE_EYE_STYLE_ES8311 || CONFIG_USE_EYE_STYLE_VB6824
+        SemaphoreHandle_t eye_mutex = NULL; // 魔眼互斥锁
+    #endif
+
     lv_draw_buf_t draw_buf_;
     lv_obj_t* status_bar_ = nullptr;
     lv_obj_t* content_ = nullptr;
@@ -38,13 +47,19 @@ protected:
     DisplayFonts fonts_;
     ThemeColors current_theme_;
 
+
     void SetupUI();
     virtual bool Lock(int timeout_ms = 0) override;
     virtual void Unlock() override;
 
 protected:
     // 添加protected构造函数
-    LcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel, DisplayFonts fonts, int width, int height);
+     // 添加protected构造函数
+    #if CONFIG_BOARD_TYPE_DOIT_ESP32S3_EYE_8311
+        LcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
+            esp_lcd_panel_io_handle_t panel_io2, esp_lcd_panel_handle_t panel2, DisplayFonts fonts,int width, int height);
+        #endif
+        LcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel, DisplayFonts fonts,int width, int height);
     
 public:
     ~LcdDisplay();
@@ -57,6 +72,9 @@ public:
 
     // Add theme switching function
     virtual void SetTheme(const std::string& theme_name) override;
+    #if CONFIG_USE_EYE_STYLE_ES8311 || CONFIG_USE_EYE_STYLE_VB6824  //如果开启魔眼显示
+        virtual void SetEye(int x_start, int y_start, int x_end, int y_end, const void *color_data) override; // 设置眼睛
+    #endif
 };
 
 // RGB LCD显示器
@@ -85,6 +103,18 @@ public:
                   bool mirror_x, bool mirror_y, bool swap_xy,
                   DisplayFonts fonts);
 };
+
+#if CONFIG_BOARD_TYPE_DOIT_ESP32S3_EYE_8311
+//SPI双屏驱动
+class DualScreenDisplay:public LcdDisplay {
+public:
+DualScreenDisplay(esp_lcd_panel_io_handle_t panel_io1, esp_lcd_panel_handle_t panel1,
+    esp_lcd_panel_io_handle_t panel_io2, esp_lcd_panel_handle_t panel2,
+    int width, int height, int offset_x, int offset_y,
+    bool mirror_x, bool mirror_y, bool swap_xy,
+    DisplayFonts fonts);
+};
+#endif
 
 // QSPI LCD显示器
 class QspiLcdDisplay : public LcdDisplay {

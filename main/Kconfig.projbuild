@@ -271,6 +271,10 @@ choice BOARD_TYPE
         bool "Doit-AI-02-Kit-Lcd"
     config BOARD_TYPE_DOIT_AI_SPEAKER
         bool "Doit-AI-SPEAKER"
+    config BOARD_TYPE_DOIT_ESP32S3_EYE_6824
+        bool "doit-esp32s3-eye-6824"
+    config BOARD_TYPE_DOIT_ESP32S3_EYE_8311
+        bool "doit-esp32s3-eye-8311"
 endchoice
 
 choice ESP_S3_LCD_EV_Board_Version_TYPE
@@ -300,7 +304,7 @@ choice DISPLAY_OLED_TYPE
 endchoice
 
 choice DISPLAY_LCD_TYPE
-    depends on BOARD_TYPE_BREAD_COMPACT_WIFI_LCD || BOARD_TYPE_BREAD_COMPACT_ESP32_LCD || BOARD_TYPE_ESP32_CGC || BOARD_TYPE_ESP32P4_NANO || BOARD_TYPE_ESP32P4_WIFI6_Touch_LCD_XC
+    depends on BOARD_TYPE_BREAD_COMPACT_WIFI_LCD || BOARD_TYPE_BREAD_COMPACT_ESP32_LCD || BOARD_TYPE_ESP32_CGC || BOARD_TYPE_ESP32P4_NANO || BOARD_TYPE_ESP32P4_WIFI6_Touch_LCD_XC || BOARD_TYPE_DOIT_ESP32S3_EYE_6824 || BOARD_TYPE_DOIT_ESP32S3_EYE_8311
     prompt "LCD Type"
     default LCD_ST7789_240X320
     help
@@ -335,6 +339,8 @@ choice DISPLAY_LCD_TYPE
         bool "ILI9341, 分辨率240*320, 非IPS"
     config LCD_GC9A01_240X240
         bool "GC9A01, 分辨率240*240, 圆屏"
+    config LCD_GC9A01_160X160
+        bool "GC9A01, 分辨率160*160, 0.71寸"
     config LCD_TYPE_800_1280_10_1_INCH
         bool "Waveshare 101M-8001280-IPS-CT-K Display"
     config LCD_TYPE_800_1280_10_1_INCH_A
@@ -358,6 +364,20 @@ choice DISPLAY_ESP32S3_KORVO2_V3
     config LCD_ILI9341
         bool "ILI9341, 分辨率240*320"
 endchoice
+
+config USE_EYE_STYLE_ES8311
+    bool "使用魔眼界面风格(ES8311)"
+    default n
+    depends on BOARD_TYPE_DOIT_ESP32S3_EYE_8311
+    help
+        使用魔眼界面风格(ES8311)
+
+config USE_EYE_STYLE_VB6824
+    bool "使用魔眼界面风格(VB6824)"
+    default n
+    depends on BOARD_TYPE_DOIT_ESP32S3_EYE_6824
+    help
+        使用魔眼界面风格(VB6824)
 
 config USE_WECHAT_MESSAGE_STYLE
     bool "Enable WeChat Message Style"
@@ -425,7 +445,7 @@ choice IOT_PROTOCOL
 endchoice
 
 config USE_AUDIO_CODEC_ENCODE_OPUS
-    depends on BOARD_TYPE_DOIT_AI_01_KIT || BOARD_TYPE_DOIT_AI_01_KIT_LCD || BOARD_TYPE_DOIT_AI_02_KIT_LCD
+    depends on BOARD_TYPE_DOIT_AI_01_KIT || BOARD_TYPE_DOIT_AI_01_KIT_LCD || BOARD_TYPE_DOIT_AI_02_KIT_LCD || BOARD_TYPE_DOIT_ESP32S3_EYE_6824
     select USE_CUSTOM_TASK_STACK_SIZE
     bool "use audio codec encode opus"
     default y

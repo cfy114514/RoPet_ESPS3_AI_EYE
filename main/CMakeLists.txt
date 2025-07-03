@@ -4,6 +4,7 @@ set(SOURCES "audio_codecs/audio_codec.cc"
             "audio_codecs/es8311_audio_codec.cc"
             "audio_codecs/es8374_audio_codec.cc"
             "audio_codecs/es8388_audio_codec.cc"
+            "audio_codecs/vb6824_audio_codec.cc"
             "audio_processing/audio_debugger.cc"
             "led/single_led.cc"
             "led/circular_strip.cc"
@@ -25,7 +26,7 @@ set(SOURCES "audio_codecs/audio_codec.cc"
             "main.cc"
             )
 
-set(INCLUDE_DIRS "." "display" "audio_codecs" "protocols" "audio_processing")
+set(INCLUDE_DIRS "." "display" "audio_codecs" "protocols" "audio_processing" "eye_data")
 
 # 添加 IOT 相关文件
 file(GLOB IOT_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/iot/things/*.cc)
@@ -199,6 +200,10 @@ elseif(CONFIG_BOARD_TYPE_DOIT_AI_02_KIT_LCD)
     set(BOARD_TYPE "doit-ai-02-kit-lcd")
 elseif(CONFIG_BOARD_TYPE_DOIT_AI_SPEAKER)
     set(BOARD_TYPE "doit-ai-speaker")
+elseif(CONFIG_BOARD_TYPE_DOIT_ESP32S3_EYE_6824)
+    set(BOARD_TYPE "doit-esp32s3-eye-6824")
+elseif(CONFIG_BOARD_TYPE_DOIT_ESP32S3_EYE_8311)
+    set(BOARD_TYPE "doit-esp32s3-eye-8311")
 endif()
 file(GLOB BOARD_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.cc

@@ -13,6 +13,10 @@
 
 #include "board.h"
 
+#if CONFIG_USE_EYE_STYLE_ES8311 || CONFIG_USE_EYE_STYLE_VB6824
+#include "application.h"
+#endif
+
 #define TAG "LcdDisplay"
 
 // Color definitions for dark theme
@@ -67,6 +71,26 @@ const ThemeColors LIGHT_THEME = {
 
 LV_FONT_DECLARE(font_awesome_30_4);
 
+
+ #if CONFIG_BOARD_TYPE_DOIT_ESP32S3_EYE_8311
+LcdDisplay::LcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
+            esp_lcd_panel_io_handle_t panel_io2, esp_lcd_panel_handle_t panel2, DisplayFonts fonts, int width, int height)
+    :panel_io_(panel_io), panel_(panel),panel_io_2(panel_io2),panel_2(panel2),fonts_(fonts) {
+    width_ = width;
+    height_ = height;
+
+    // Load theme from settings
+    Settings settings("display", false);
+    current_theme_name_ = settings.GetString("theme", "light");
+
+    // Update the theme
+    if (current_theme_name_ == "dark") {
+        current_theme_ = DARK_THEME;
+    } else if (current_theme_name_ == "light") {
+        current_theme_ = LIGHT_THEME;
+    }
+}
+#else
 LcdDisplay::LcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel, DisplayFonts fonts, int width, int height)
     : panel_io_(panel_io), panel_(panel), fonts_(fonts) {
     width_ = width;
@@ -83,12 +107,16 @@ LcdDisplay::LcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_
         current_theme_ = LIGHT_THEME;
     }
 }
+#endif
 
 SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
                            int width, int height, int offset_x, int offset_y, bool mirror_x, bool mirror_y, bool swap_xy,
                            DisplayFonts fonts)
     : LcdDisplay(panel_io, panel, fonts, width, height) {
 
+    #if CONFIG_USE_EYE_STYLE_ES8311 || CONFIG_USE_EYE_STYLE_VB6824    //魔眼
+
+    #else
     // draw white
     std::vector<uint16_t> buffer(width_, 0xFFFF);
     for (int y = 0; y < height_; y++) {
@@ -145,9 +173,79 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
     if (offset_x != 0 || offset_y != 0) {
         lv_display_set_offset(display_, offset_x, offset_y);
     }
-
+    #endif
     SetupUI();
 }
+
+#if CONFIG_BOARD_TYPE_DOIT_ESP32S3_EYE_8311
+DualScreenDisplay::DualScreenDisplay(esp_lcd_panel_io_handle_t panel_io1, esp_lcd_panel_handle_t panel1,
+    esp_lcd_panel_io_handle_t panel_io2, esp_lcd_panel_handle_t panel2,
+    int width, int height, int offset_x, int offset_y,
+    bool mirror_x, bool mirror_y, bool swap_xy,
+    DisplayFonts fonts)
+    : LcdDisplay(panel_io1, panel1, panel_io2, panel2, fonts,width,height) {
+    #if CONFIG_USE_EYE_STYLE_ES8311 || CONFIG_USE_EYE_STYLE_VB6824    //魔眼
+
+    #else
+    // draw white
+    std::vector<uint16_t> buffer(width_, 0xFFFF);
+    for (int y = 0; y < height_; y++) {
+        esp_lcd_panel_draw_bitmap(panel_, 0, y, width_, y + 1, buffer.data());
+    }
+
+    // Set the display to on
+    ESP_LOGI(TAG, "Turning display on");
+    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_, true));
+
+    ESP_LOGI(TAG, "Initialize LVGL library");
+    lv_init();
+
+    ESP_LOGI(TAG, "Initialize LVGL port");
+    lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
+    port_cfg.task_priority = 1;
+    port_cfg.timer_period_ms = 50;
+    lvgl_port_init(&port_cfg);
+
+    ESP_LOGI(TAG, "Adding LCD screen");
+    const lvgl_port_display_cfg_t display_cfg = {
+        .io_handle = panel_io_,
+        .panel_handle = panel_,
+        .control_handle = nullptr,
+        .buffer_size = static_cast<uint32_t>(width_ * 20),
+        .double_buffer = false,
+        .trans_size = 0,
+        .hres = static_cast<uint32_t>(width_),
+        .vres = static_cast<uint32_t>(height_),
+        .monochrome = false,
+        .rotation = {
+            .swap_xy = swap_xy,
+            .mirror_x = mirror_x,
+            .mirror_y = mirror_y,
+        },
+        .color_format = LV_COLOR_FORMAT_RGB565,
+        .flags = {
+            .buff_dma = 1,
+            .buff_spiram = 0,
+            .sw_rotate = 0,
+            .swap_bytes = 1,
+            .full_refresh = 0,
+            .direct_mode = 0,
+        },
+    };
+
+    display_ = lvgl_port_add_disp(&display_cfg);
+    if (display_ == nullptr) {
+        ESP_LOGE(TAG, "Failed to add display");
+        return;
+    }
+
+    if (offset_x != 0 || offset_y != 0) {
+        lv_display_set_offset(display_, offset_x, offset_y);
+    }
+    #endif
+    SetupUI();
+}
+#endif
 
 // RGB LCD实现
 RgbLcdDisplay::RgbLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
@@ -297,11 +395,23 @@ LcdDisplay::~LcdDisplay() {
 }
 
 bool LcdDisplay::Lock(int timeout_ms) {
-    return lvgl_port_lock(timeout_ms);
+     #if CONFIG_USE_EYE_STYLE_ES8311 || CONFIG_USE_EYE_STYLE_VB6824    //魔眼
+        // if (xSemaphoreTake(eye_mutex, timeout_ms) != pdTRUE) {
+        //     ESP_LOGE("LCD", "Failed to acquire LCD mutex");
+        //     return ESP_FAIL;
+        // }
+        return true;
+    #else
+        return lvgl_port_lock(timeout_ms);
+    #endif
 }
 
 void LcdDisplay::Unlock() {
-    lvgl_port_unlock();
+    #if CONFIG_USE_EYE_STYLE_ES8311 || CONFIG_USE_EYE_STYLE_VB6824    //魔眼
+        // xSemaphoreGive(eye_mutex);
+    #else
+        lvgl_port_unlock();
+    #endif
 }
 
 #if CONFIG_USE_WECHAT_MESSAGE_STYLE
@@ -703,6 +813,15 @@ void LcdDisplay::SetPreviewImage(const lv_img_dsc_t* img_dsc) {
         lv_obj_scroll_to_view_recursive(img_bubble, LV_ANIM_ON);
     }
 }
+#elif CONFIG_USE_EYE_STYLE_ES8311 || CONFIG_USE_EYE_STYLE_VB6824
+//用于触发魔眼动画
+void LcdDisplay::SetupUI() {
+    // xTaskCreatePinnedToCore( task_eye_update, "task_eye_update", 1024*4, NULL, 4, &task_update_eye_handler,0);
+}
+
+void LcdDisplay::SetPreviewImage(const lv_img_dsc_t* img_dsc) {
+
+}
 #else
 void LcdDisplay::SetupUI() {
     DisplayLockGuard lock(this);
@@ -808,6 +927,7 @@ void LcdDisplay::SetupUI() {
     lv_obj_add_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN);
 }
 
+
 void LcdDisplay::SetPreviewImage(const lv_img_dsc_t* img_dsc) {
     DisplayLockGuard lock(this);
     if (preview_image_ == nullptr) {
@@ -834,6 +954,76 @@ void LcdDisplay::SetPreviewImage(const lv_img_dsc_t* img_dsc) {
 }
 #endif
 
+#if CONFIG_USE_EYE_STYLE_ES8311 || CONFIG_USE_EYE_STYLE_VB6824
+
+    typedef struct {
+        const char* name;
+        int eyeNewX;
+        int eyeNewY;
+        bool isBlinking;
+        bool isTrack;
+    } EmotionConfig;
+
+   
+    void LcdDisplay::SetEmotion(const char* emotion) {
+        ESP_LOGI(TAG,"%s",emotion);
+        
+        static const EmotionConfig emotionConfigs[] = {
+            {"neutral", 505, 805, true, true}, // 默认表情，眼球居中，正常眨眼"😶" ok
+            {"happy", 520, 1005, true, true},   // 眼睛稍微向下看，显得开心"🙂" ok
+            {"laughing", 500, 1015, true, true}, // 眼睛向下看，显得大笑"😆"    ok
+            {"funny", 520, 25, true, true},   // 眼睛向下看，显得搞笑"😂"
+            {"sad",265, 335, true, true},     // 眼睛向上看，显得悲伤"😔" ok
+            {"angry", 700, 510, true, true},  // 眼睛向右看，显得生气 "😠"
+            {"crying", 514, 100, true, true},  // 眼睛向上看，显得哭泣 "😭"
+            {"loving", 510, 540, true, true}, // 眼睛稍微向下看，显得爱慕 "😍"
+            {"embarrassed", 1000, 510, true, true}, // 眼睛稍微向上看，显得尴尬 "😳" ok
+            {"surprised", 150, 445, true, false}, // 眼睛向右看，显得惊讶    "😯" ok
+            {"shocked", 985, 615, true, false},   // 眼睛向右看，显得震惊 "😱"  ok
+            {"thinking", 65,670, true, true}, // 眼睛稍微向上看，显得思考 "🤔"
+            {"winking", 510, 520, false, true},  // 眼睛眨眼，显得眨眼 "😉"
+            {"cool",510, 510, true, true},     // 眼睛正常，显得酷 "😎"
+            {"relaxed", 510, 490, true, true},  // 眼睛稍微闭合，显得放松 "😌"
+            {"delicious", 510, 490, true, true}, // 眼睛稍微向下看，显得享受美食 "🤤"
+            {"kissy", 1015, 510, true, true},    // 眼睛正常，显得亲吻 "😘"
+            {"confident", 890, 650, true, true}, // 眼睛正常，显得自信 "😏" ok ?
+            {"sleepy", 535, 605, true, true},   // 眼睛稍微闭合，显得困倦 "😴" ok
+            {"silly", 515, 750, true, true},    // 眼睛向上看，显得愚蠢 "😜"
+            {"confused", 1020, 1020, true, true}  // 眼睛稍微向上看，显得困惑 "🙄"
+            // 添加更多表情配置
+        };
+       // 查找表情配置
+    for (size_t i = 0; i < sizeof(emotionConfigs) / sizeof(EmotionConfig); i++) {
+        if (strcmp(emotionConfigs[i].name, emotion) == 0) {
+            //ESP_LOGI(TAG,"emotion:%s,name:%s,c_eyeX:%d,c_eyeY=%d,eyeX=%d,eyeY=%d,uT=%d,lT=%d",emotion,emotionConfigs[i].name,emotionConfigs[i].eyeX,emotionConfigs[i].eyeY,eyeX,eyeY,uThreshold,lThreshold);
+            auto& app = Application::GetInstance();
+            //更新眼睛状态x`
+            app.eyeNewX= emotionConfigs[i].eyeNewX;
+            app.eyeNewY = emotionConfigs[i].eyeNewY;
+            app.is_blink = emotionConfigs[i].isBlinking;
+            app.is_track = emotionConfigs[i].isTrack;
+
+    // If low power, the material ready event will be triggered by the modem because of a reset
+            // ESP_LOGI(TAG,"eyeNewX=%d,eyeNewY=%d,is_blink=%d,is_track=%d",eyeNewX,eyeNewY,is_blink,is_track);
+            break;
+        }
+    }
+
+    }
+    void LcdDisplay::SetIcon(const char* icon) {}
+    void LcdDisplay::SetTheme(const std::string& theme_name) {}
+
+    #if CONFIG_USE_EYE_STYLE_ES8311 || CONFIG_USE_EYE_STYLE_VB6824  //如果开启魔眼显示
+    void LcdDisplay::SetEye(int x_start, int y_start, int x_end, int y_end, const void *color_data){
+         Lock();
+        esp_err_t ret = esp_lcd_panel_draw_bitmap(panel_, x_start, y_start, x_end, y_end, color_data);
+        #if CONFIG_USE_EYE_STYLE_ES8311
+            esp_err_t ret2 = esp_lcd_panel_draw_bitmap(panel_2, x_start, y_start, x_end, y_end, color_data);
+        #endif
+         Unlock();
+    }
+    #endif
+#else
 void LcdDisplay::SetEmotion(const char* emotion) {
     struct Emotion {
         const char* icon;
@@ -1102,3 +1292,4 @@ void LcdDisplay::SetTheme(const std::string& theme_name) {
     // No errors occurred. Save theme to settings
     Display::SetTheme(theme_name);
 }
+#endif
