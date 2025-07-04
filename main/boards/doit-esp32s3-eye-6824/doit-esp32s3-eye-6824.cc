@@ -86,23 +86,25 @@ private:
             app.ToggleChatState();
         });
          boot_button_.OnPressRepeat([this](uint16_t count) {
-            ESP_LOGI(TAG,"boot button down");
             if(count >= 3){
                 ESP_LOGI(TAG, "重新配网");
                 ResetWifiConfiguration();
             }
         });
         #if (defined(CONFIG_VB6824_OTA_SUPPORT) && CONFIG_VB6824_OTA_SUPPORT == 1)
-            boot_button_.OnDoubleClick([this]() {
-                audio_codec.OtaStart(0);
+             boot_button_.OnDoubleClick([this]() {
+            if (esp_timer_get_time() > 20 * 1000 * 1000) {
+                ESP_LOGI(TAG, "Long press, do not enter OTA mode %ld", (uint32_t)esp_timer_get_time());
+                return;
+            }
+            audio_codec.OtaStart(0);
         });
-         #else
-            boot_button_.OnDoubleClick([this]() {
-                auto& app = Application::GetInstance();
-                app.eye_style_num = (app.eye_style_num+1) % 8;
-                app.eye_style(app.eye_style_num);
-            });
         #endif
+        // boot_button_.OnDoubleClick([this]() {
+        //     auto& app = Application::GetInstance();
+        //     app.eye_style_num = (app.eye_style_num+1) % 8;
+        //     app.eye_style(app.eye_style_num);
+        // });
     }
 
     // 物联网初始化，添加对 AI 可见设备
