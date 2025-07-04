@@ -25,23 +25,23 @@ https://www.bilibili.com/video/BV1BcV2zLEaf/
 3. 修改menuconfig:idf.py menuconfig
     --板子类型选择（ES8311/VB6824）
         -ES8311:将Xiaozhi Assistant->Board Type设置为doit-esp32s3-eye,并开启使用魔眼界面风格(ES8311)
-        ![alt text](doit-eye-8311.png)
+        ![alt text](docs/photo/doit-eye-8311.png)
         -VB6824:将Xiaozhi Assistant->Board Type设置为doit-esp32s3-6824,并开启使用魔眼界面风格(VB6824)
-        ![alt text](doit-eye-6824.png)
+        ![alt text](docs/photo/doit-eye-6824.png)
     --屏幕类型选择（1.28/0.71）
         -1.28寸:将Xiaozhi Assistant->LCD_Type设置为【GC9A01，分辨率240*240，圆屏】
-        ![alt text](1.28.png)
+        ![alt text](docs/photo/1.28.png)
         -0.71寸：将Xiaozhi Assistant->LCD_Type设置为【GC9A01，分辨率160*160，0.71寸】
-        ![alt text](0.71.png)
+        ![alt text](docs/photo/0.71.png)
 4. 编译工程：idf.py build
 5. 烧录代码:idf.py flash
 
 
 ## 硬件部分
-查看工程 hardware目录下的AI-EYE.PcbDoc / AI-EYE.SchDoc / datasheet目录
+查看工程 docs目录
 
 ## 技术支持
-![alt text](image.png)
+![alt text](docs/photo/image.png)
 
 ## 购买链接
 https://item.taobao.com/item.htm?id=920076138845

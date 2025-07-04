@@ -92,7 +92,7 @@ private:
                 ResetWifiConfiguration();
             }
         });
-        #if (defined(CONFIG_VB6824_OTA_SUPPORT) && CONFIG_VB6824_OTA_SUPPORT == 1) && !defined(CONFIG_USE_EYE_STYLE_VB6824)
+        #if (defined(CONFIG_VB6824_OTA_SUPPORT) && CONFIG_VB6824_OTA_SUPPORT == 1)
             boot_button_.OnDoubleClick([this]() {
                 audio_codec.OtaStart(0);
         });
