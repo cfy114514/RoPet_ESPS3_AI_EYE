@@ -2,7 +2,7 @@
  * @Description: 
  * @Author: cjs丶
  * @Date: 2025-06-11 09:29:39
- * @LastEditTime: 2025-06-18 09:22:34
+ * @LastEditTime: 2025-07-16 17:01:43
  * @LastEditors: cjs丶
  */
 #ifndef _BOARD_CONFIG_H_
@@ -13,6 +13,7 @@
 #define CODEC_TX_GPIO           GPIO_NUM_17
 #define CODEC_RX_GPIO           GPIO_NUM_18
 
+#define BUILTIN_LED_GPIO        GPIO_NUM_7
 #define BOOT_BUTTON_GPIO        GPIO_NUM_0
 #define SLEEP_GOIO              GPIO_NUM_9
 

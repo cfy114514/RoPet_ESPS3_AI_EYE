@@ -66,8 +66,8 @@ private:
         power_save_timer_->OnShutdownRequest([this]() {
             //pmic_->PowerOff();
             //gpio_set_level(SLEEP_GOIO, 0);
-            ESP_LOGI(TAG,"Not used for a long time. Shut down. Press and hold to turn on!");
-            gpio_set_level(SLEEP_GOIO, 0);
+            // ESP_LOGI(TAG,"Not used for a long time. Shut down. Press and hold to turn on!");
+            // gpio_set_level(SLEEP_GOIO, 0);
         });
         power_save_timer_->SetEnabled(true);
     }
@@ -210,10 +210,10 @@ public:
         
     }
 
-    // virtual Led* GetLed() override {
-    //     static SingleLed led(BUILTIN_LED_GPIO);
-    //     return &led;
-    // }
+    virtual Led* GetLed() override {
+        static SingleLed led(BUILTIN_LED_GPIO);
+        return &led;
+    }
 
    virtual AudioCodec* GetAudioCodec() override {
         return &audio_codec;
