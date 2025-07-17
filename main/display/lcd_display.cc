@@ -1016,6 +1016,7 @@ void LcdDisplay::SetPreviewImage(const lv_img_dsc_t* img_dsc) {
     #if CONFIG_USE_EYE_STYLE_ES8311 || CONFIG_USE_EYE_STYLE_VB6824  //如果开启魔眼显示
     void LcdDisplay::SetEye(int x_start, int y_start, int x_end, int y_end, const void *color_data){
          Lock();
+
         esp_err_t ret = esp_lcd_panel_draw_bitmap(panel_, x_start, y_start, x_end, y_end, color_data);
         #if CONFIG_USE_EYE_STYLE_ES8311
             esp_err_t ret2 = esp_lcd_panel_draw_bitmap(panel_2, x_start, y_start, x_end, y_end, color_data);
