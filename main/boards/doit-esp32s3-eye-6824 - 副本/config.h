@@ -15,7 +15,8 @@
 
 #define BOOT_BUTTON_GPIO        GPIO_NUM_0
 #define SLEEP_GOIO              GPIO_NUM_9
-#define BUILTIN_LED_GPIO            GPIO_NUM_7 // 定义板载LED的GPIO引脚，根据原理图是GPIO7 (RGB DI)
+#define BUILTIN_LED_GPIO        GPIO_NUM_1
+
 //分辨率
 #if CONFIG_LCD_GC9A01_240X240
     #define DISPLAY_WIDTH   240
