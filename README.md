@@ -40,8 +40,3 @@ https://www.bilibili.com/video/BV1BcV2zLEaf/
 ## 硬件部分
 查看工程 docs目录
 
-## 技术支持
-![alt text](docs/photo/image.png)
-
-## 购买链接
-https://item.taobao.com/item.htm?id=920076138845
