@@ -1,6 +1,6 @@
 #include "wifi_board.h"
 
-#include "display.h"
+#include "display.h" // 保持此头文件，因为 WifiBoard 接口中仍有 GetDisplay() 声明
 #include "application.h"
 #include "system_info.h"
 #include "font_awesome_symbols.h"
@@ -52,7 +52,7 @@ void WifiBoard::EnterWifiConfigMode() {
     hint += wifi_ap.GetWebServerUrl();
     hint += "\n\n";
     
-    // 播报配置 WiFi 的提示
+    // 播报配置 WiFi 的提示 (Alert 函数内部可能间接使用显示，但这里不直接操作 display_)
     application.Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "", Lang::Sounds::P3_WIFICONFIG);
     
     // Wait forever until reset after configuration
@@ -82,21 +82,36 @@ void WifiBoard::StartNetwork() {
 
     auto& wifi_station = WifiStation::GetInstance();
     wifi_station.OnScanBegin([this]() {
+        // 添加空指针检查，确保只有在显示器可用时才调用 ShowNotification
         auto display = Board::GetInstance().GetDisplay();
-        display->ShowNotification(Lang::Strings::SCANNING_WIFI, 30000);
+        if (display) {
+            display->ShowNotification(Lang::Strings::SCANNING_WIFI, 30000);
+        } else {
+            ESP_LOGI(TAG, "Wi-Fi Scan Begin."); // 如果无显示器，则输出日志
+        }
     });
     wifi_station.OnConnect([this](const std::string& ssid) {
+        // 添加空指针检查
         auto display = Board::GetInstance().GetDisplay();
         std::string notification = Lang::Strings::CONNECT_TO;
         notification += ssid;
         notification += "...";
-        display->ShowNotification(notification.c_str(), 30000);
+        if (display) {
+            display->ShowNotification(notification.c_str(), 30000);
+        } else {
+            ESP_LOGI(TAG, "Connecting to Wi-Fi: %s", notification.c_str()); // 如果无显示器，则输出日志
+        }
     });
     wifi_station.OnConnected([this](const std::string& ssid) {
+        // 添加空指针检查
         auto display = Board::GetInstance().GetDisplay();
         std::string notification = Lang::Strings::CONNECTED_TO;
         notification += ssid;
-        display->ShowNotification(notification.c_str(), 30000);
+        if (display) {
+            display->ShowNotification(notification.c_str(), 30000);
+        } else {
+            ESP_LOGI(TAG, "Successfully connected to Wi-Fi: %s", notification.c_str()); // 如果无显示器，则输出日志
+        }
     });
     wifi_station.Start();
 
@@ -176,7 +191,13 @@ void WifiBoard::ResetWifiConfiguration() {
         Settings settings("wifi", true);
         settings.SetInt("force_ap", 1);
     }
-    GetDisplay()->ShowNotification(Lang::Strings::ENTERING_WIFI_CONFIG_MODE);
+    // 添加空指针检查
+    auto display = Board::GetInstance().GetDisplay();
+    if (display) {
+        display->ShowNotification(Lang::Strings::ENTERING_WIFI_CONFIG_MODE);
+    } else {
+        ESP_LOGI(TAG, "Entering Wi-Fi configuration mode..."); // 如果无显示器，则输出日志
+    }
     vTaskDelay(pdMS_TO_TICKS(1000));
     // Reboot the device
     esp_restart();
@@ -185,28 +206,27 @@ void WifiBoard::ResetWifiConfiguration() {
 std::string WifiBoard::GetDeviceStatusJson() {
     /*
      * 返回设备状态JSON
-     * 
-     * 返回的JSON结构如下：
+     * * 返回的JSON结构如下：
      * {
-     *     "audio_speaker": {
-     *         "volume": 70
-     *     },
-     *     "screen": {
-     *         "brightness": 100,
-     *         "theme": "light"
-     *     },
-     *     "battery": {
-     *         "level": 50,
-     *         "charging": true
-     *     },
-     *     "network": {
-     *         "type": "wifi",
-     *         "ssid": "Xiaozhi",
-     *         "rssi": -60
-     *     },
-     *     "chip": {
-     *         "temperature": 25
-     *     }
+     * "audio_speaker": {
+     * "volume": 70
+     * },
+     * "screen": { // 屏幕相关信息，即使没有物理屏幕，也可以保留结构，但值可能不准确
+     * "brightness": 100,
+     * "theme": "light"
+     * },
+     * "battery": {
+     * "level": 50,
+     * "charging": true
+     * },
+     * "network": {
+     * "type": "wifi",
+     * "ssid": "Xiaozhi",
+     * "rssi": -60
+     * },
+     * "chip": {
+     * "temperature": 25
+     * }
      * }
      */
     auto& board = Board::GetInstance();
@@ -221,15 +241,17 @@ std::string WifiBoard::GetDeviceStatusJson() {
     cJSON_AddItemToObject(root, "audio_speaker", audio_speaker);
 
     // Screen brightness
+    // 添加空指针检查
     auto backlight = board.GetBacklight();
     auto screen = cJSON_CreateObject();
-    if (backlight) {
+    if (backlight) { // 只有当背光对象可用时才添加亮度信息
         cJSON_AddNumberToObject(screen, "brightness", backlight->brightness());
     }
     auto display = board.GetDisplay();
-    if (display && display->height() > 64) { // For LCD display only
+    if (display && display->height() > 64) { // 只有当显示器对象可用且高度大于64时才添加主题信息
         cJSON_AddStringToObject(screen, "theme", display->GetTheme().c_str());
     }
+    // 即使没有物理屏幕，也可以保留 "screen" 对象，只是其内容可能为空或默认值
     cJSON_AddItemToObject(root, "screen", screen);
 
     // Battery

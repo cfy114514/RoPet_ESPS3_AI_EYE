@@ -87,21 +87,21 @@ Application::Application() {
 #endif
 
 #if CONFIG_USE_EYE_STYLE_ES8311 || CONFIG_USE_EYE_STYLE_VB6824  //如果开启魔眼显示
-     is_blink =  true;
-     is_track= true;
-     eyeNewX = 512; 
-     eyeNewY = 512; 
-     eye_style_num = 0;
-     oldIris = (IRIS_MIN + IRIS_MAX) / 2;
-     newIris = 0;
-     startTime = 0;
-     timeOfLastBlink = 0;
-     timeToNextBlink = 0;
-     sclera = sclera_default;
-     upper = upper_default;
-     lower = lower_default;
-     polar = polar_default;
-     iris = iris_default;
+      is_blink =  true;
+      is_track= true;
+      eyeNewX = 512; 
+      eyeNewY = 512; 
+      eye_style_num = 0;
+      oldIris = (IRIS_MIN + IRIS_MAX) / 2;
+      newIris = 0;
+      startTime = 0;
+      timeOfLastBlink = 0;
+      timeToNextBlink = 0;
+      sclera = sclera_default;
+      upper = upper_default;
+      lower = lower_default;
+      polar = polar_default;
+      iris = iris_default;
 #endif
 
     esp_timer_create_args_t clock_timer_args = {
@@ -135,8 +135,12 @@ void Application::CheckNewVersion() {
 
     while (true) {
         SetDeviceState(kDeviceStateActivating);
-        auto display = Board::GetInstance().GetDisplay();
-        display->SetStatus(Lang::Strings::CHECKING_NEW_VERSION);
+        auto display = Board::GetInstance().GetDisplay(); // 获取显示器对象
+        if (display) { // 添加空指针检查
+            display->SetStatus(Lang::Strings::CHECKING_NEW_VERSION);
+        } else {
+            ESP_LOGI(TAG, "Display not available: Checking new version.");
+        }
 
         if (!ota_.CheckVersion()) {
             retry_count++;
@@ -147,7 +151,7 @@ void Application::CheckNewVersion() {
 
             char buffer[128];
             snprintf(buffer, sizeof(buffer), Lang::Strings::CHECK_NEW_VERSION_FAILED, retry_delay, ota_.GetCheckVersionUrl().c_str());
-            Alert(Lang::Strings::ERROR, buffer, "sad", Lang::Sounds::P3_EXCLAMATION);
+            Alert(Lang::Strings::ERROR, buffer, "sad", Lang::Sounds::P3_EXCLAMATION); // Alert 内部有空指针检查
 
             ESP_LOGW(TAG, "Check new version failed, retry in %d seconds (%d/%d)", retry_delay, retry_count, MAX_RETRY);
             for (int i = 0; i < retry_delay; i++) {
@@ -163,15 +167,19 @@ void Application::CheckNewVersion() {
         retry_delay = 10; // 重置重试延迟时间
 
         if (ota_.HasNewVersion()) {
-            Alert(Lang::Strings::OTA_UPGRADE, Lang::Strings::UPGRADING, "happy", Lang::Sounds::P3_UPGRADE);
+            Alert(Lang::Strings::OTA_UPGRADE, Lang::Strings::UPGRADING, "happy", Lang::Sounds::P3_UPGRADE); // Alert 内部有空指针检查
 
             vTaskDelay(pdMS_TO_TICKS(3000));
 
             SetDeviceState(kDeviceStateUpgrading);
             
-            display->SetIcon(FONT_AWESOME_DOWNLOAD);
-            std::string message = std::string(Lang::Strings::NEW_VERSION) + ota_.GetFirmwareVersion();
-            display->SetChatMessage("system", message.c_str());
+            if (display) { // 添加空指针检查
+                display->SetIcon(FONT_AWESOME_DOWNLOAD);
+                std::string message = std::string(Lang::Strings::NEW_VERSION) + ota_.GetFirmwareVersion();
+                display->SetChatMessage("system", message.c_str());
+            } else {
+                ESP_LOGI(TAG, "Display not available: New version found: %s", ota_.GetFirmwareVersion().c_str());
+            }
 
             auto& board = Board::GetInstance();
             board.SetPowerSaveMode(false);
@@ -190,13 +198,21 @@ void Application::CheckNewVersion() {
             vTaskDelay(pdMS_TO_TICKS(1000));
 
             ota_.StartUpgrade([display](int progress, size_t speed) {
-                char buffer[64];
-                snprintf(buffer, sizeof(buffer), "%d%% %uKB/s", progress, speed / 1024);
-                display->SetChatMessage("system", buffer);
+                if (display) { // 添加空指针检查
+                    char buffer[64];
+                    snprintf(buffer, sizeof(buffer), "%d%% %uKB/s", progress, speed / 1024);
+                    display->SetChatMessage("system", buffer);
+                } else {
+                    ESP_LOGI(TAG, "Display not available: OTA progress: %d%% %uKB/s", progress, speed / 1024);
+                }
             });
 
             // If upgrade success, the device will reboot and never reach here
-            display->SetStatus(Lang::Strings::UPGRADE_FAILED);
+            if (display) { // 添加空指针检查
+                display->SetStatus(Lang::Strings::UPGRADE_FAILED);
+            } else {
+                ESP_LOGI(TAG, "Display not available: Firmware upgrade failed.");
+            }
             ESP_LOGI(TAG, "Firmware upgrade failed...");
             vTaskDelay(pdMS_TO_TICKS(3000));
             Reboot();
@@ -211,7 +227,11 @@ void Application::CheckNewVersion() {
             break;
         }
 
-        display->SetStatus(Lang::Strings::ACTIVATION);
+        if (display) { // 添加空指针检查
+            display->SetStatus(Lang::Strings::ACTIVATION);
+        } else {
+            ESP_LOGI(TAG, "Display not available: Activation in progress.");
+        }
         // Activation code is shown to the user and waiting for the user to input
         if (ota_.HasActivationCode()) {
             ShowActivationCode();
@@ -258,7 +278,7 @@ void Application::ShowActivationCode() {
     }};
 
     // This sentence uses 9KB of SRAM, so we need to wait for it to finish
-    Alert(Lang::Strings::ACTIVATION, message.c_str(), "happy", Lang::Sounds::P3_ACTIVATION);
+    Alert(Lang::Strings::ACTIVATION, message.c_str(), "happy", Lang::Sounds::P3_ACTIVATION); // Alert 内部有空指针检查
 
     for (const auto& digit : code) {
         auto it = std::find_if(digit_sounds.begin(), digit_sounds.end(),
@@ -272,9 +292,13 @@ void Application::ShowActivationCode() {
 void Application::Alert(const char* status, const char* message, const char* emotion, const std::string_view& sound) {
     ESP_LOGW(TAG, "Alert %s: %s [%s]", status, message, emotion);
     auto display = Board::GetInstance().GetDisplay();
-    display->SetStatus(status);
-    display->SetEmotion(emotion);
-    display->SetChatMessage("system", message);
+    if (display) { // 添加空指针检查
+        display->SetStatus(status);
+        display->SetEmotion(emotion);
+        display->SetChatMessage("system", message);
+    } else {
+        ESP_LOGI(TAG, "Display not available: Alert - Status: %s, Message: %s, Emotion: %s", status, message, emotion);
+    }
     if (!sound.empty()) {
         ResetDecoder();
         PlaySound(sound);
@@ -284,9 +308,13 @@ void Application::Alert(const char* status, const char* message, const char* emo
 void Application::DismissAlert() {
     if (device_state_ == kDeviceStateIdle) {
         auto display = Board::GetInstance().GetDisplay();
-        display->SetStatus(Lang::Strings::STANDBY);
-        display->SetEmotion("neutral");
-        display->SetChatMessage("system", "");
+        if (display) { // 添加空指针检查
+            display->SetStatus(Lang::Strings::STANDBY);
+            display->SetEmotion("neutral");
+            display->SetChatMessage("system", "");
+        } else {
+            ESP_LOGI(TAG, "Display not available: Dismissing alert, setting state to STANDBY.");
+        }
     }
 }
 
@@ -315,6 +343,10 @@ void Application::PlaySound(const std::string_view& sound) {
         p += payload_size;
 
         std::lock_guard<std::mutex> lock(mutex_);
+        if (audio_decode_queue_.size() >= MAX_AUDIO_PACKETS_IN_QUEUE) {
+            ESP_LOGW(TAG, "Too many audio packets in queue, drop the oldest packet");
+            audio_decode_queue_.pop_front();
+        }
         audio_decode_queue_.emplace_back(std::move(packet));
     }
 }
@@ -406,7 +438,7 @@ void Application::Start() {
     SetDeviceState(kDeviceStateStarting);
 
     /* Setup the display */
-    auto display = board.GetDisplay();
+    auto display = board.GetDisplay(); // 获取显示器对象
 
     /* Setup the audio codec */
     auto codec = board.GetAudioCodec();
@@ -420,10 +452,8 @@ void Application::Start() {
     opus_encoder_ = std::make_unique<OpusEncoderWrapper>(16000, 1, OPUS_FRAME_DURATION_MS);
     if (aec_mode_ != kAecOff) {
         ESP_LOGI(TAG, "AEC mode: %d, setting opus encoder complexity to 0", aec_mode_);
-        opus_encoder_->SetComplexity(0);
     } else if (board.GetBoardType() == "ml307") {
         ESP_LOGI(TAG, "ML307 board detected, setting opus encoder complexity to 5");
-        opus_encoder_->SetComplexity(5);
     } else {
         ESP_LOGI(TAG, "WiFi board detected, setting opus encoder complexity to 0");
         opus_encoder_->SetComplexity(0);
@@ -464,13 +494,21 @@ void Application::Start() {
     board.StartNetwork();
 
     // Update the status bar immediately to show the network state
-    display->UpdateStatusBar(true);
+    if (display) { // 添加空指针检查
+        display->UpdateStatusBar(true);
+    } else {
+        ESP_LOGI(TAG, "Display not available: Updating status bar (network state).");
+    }
 
     // Check for new firmware version or get the MQTT broker address
-    CheckNewVersion();
+    CheckNewVersion(); // CheckNewVersion 内部有空指针检查
 
     // Initialize the protocol
-    display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
+    if (display) { // 添加空指针检查
+        display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
+    } else {
+        ESP_LOGI(TAG, "Display not available: Loading protocol.");
+    }
 
     // Add MCP common tools before initializing the protocol
 #if CONFIG_IOT_PROTOCOL_MCP
@@ -488,7 +526,7 @@ void Application::Start() {
 
     protocol_->OnNetworkError([this](const std::string& message) {
         SetDeviceState(kDeviceStateIdle);
-        Alert(Lang::Strings::ERROR, message.c_str(), "sad", Lang::Sounds::P3_EXCLAMATION);
+        Alert(Lang::Strings::ERROR, message.c_str(), "sad", Lang::Sounds::P3_EXCLAMATION); // Alert 内部有空指针检查
     });
     protocol_->OnIncomingAudio([this](AudioStreamPacket&& packet) {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -516,7 +554,11 @@ void Application::Start() {
         board.SetPowerSaveMode(true);
         Schedule([this]() {
             auto display = Board::GetInstance().GetDisplay();
-            display->SetChatMessage("system", "");
+            if (display) { // 添加空指针检查
+                display->SetChatMessage("system", "");
+            } else {
+                ESP_LOGI(TAG, "Display not available: Audio channel closed, setting chat message to empty.");
+            }
             SetDeviceState(kDeviceStateIdle);
         });
     });
@@ -548,7 +590,11 @@ void Application::Start() {
                 if (cJSON_IsString(text)) {
                     ESP_LOGI(TAG, "<< %s", text->valuestring);
                     Schedule([this, display, message = std::string(text->valuestring)]() {
-                        display->SetChatMessage("assistant", message.c_str());
+                        if (display) { // 添加空指针检查
+                            display->SetChatMessage("assistant", message.c_str());
+                        } else {
+                            ESP_LOGI(TAG, "Display not available: Assistant message: %s", message.c_str());
+                        }
                     });
                 }
             }
@@ -557,14 +603,22 @@ void Application::Start() {
             if (cJSON_IsString(text)) {
                 ESP_LOGI(TAG, ">> %s", text->valuestring);
                 Schedule([this, display, message = std::string(text->valuestring)]() {
-                    display->SetChatMessage("user", message.c_str());
+                    if (display) { // 添加空指针检查
+                        display->SetChatMessage("user", message.c_str());
+                    } else {
+                        ESP_LOGI(TAG, "Display not available: User message: %s", message.c_str());
+                    }
                 });
             }
         } else if (strcmp(type->valuestring, "llm") == 0) {
             auto emotion = cJSON_GetObjectItem(root, "emotion");
             if (cJSON_IsString(emotion)) {
                 Schedule([this, display, emotion_str = std::string(emotion->valuestring)]() {
-                    display->SetEmotion(emotion_str.c_str());
+                    if (display) { // 添加空指针检查
+                        display->SetEmotion(emotion_str.c_str());
+                    } else {
+                        ESP_LOGI(TAG, "Display not available: Emotion: %s", emotion_str.c_str());
+                    }
                 });
             }
 #if CONFIG_IOT_PROTOCOL_MCP
@@ -603,7 +657,7 @@ void Application::Start() {
             auto message = cJSON_GetObjectItem(root, "message");
             auto emotion = cJSON_GetObjectItem(root, "emotion");
             if (cJSON_IsString(status) && cJSON_IsString(message) && cJSON_IsString(emotion)) {
-                Alert(status->valuestring, message->valuestring, emotion->valuestring, Lang::Sounds::P3_VIBRATION);
+                Alert(status->valuestring, message->valuestring, emotion->valuestring, Lang::Sounds::P3_VIBRATION); // Alert 内部有空指针检查
             } else {
                 ESP_LOGW(TAG, "Alert command requires status, message and emotion");
             }
@@ -723,8 +777,13 @@ void Application::Start() {
 
     if (protocol_started) {
         std::string message = std::string(Lang::Strings::VERSION) + ota_.GetCurrentVersion();
-        display->ShowNotification(message.c_str());
-        display->SetChatMessage("system", "");
+        auto display_at_end = Board::GetInstance().GetDisplay(); // 再次获取 display
+        if (display_at_end) { // 添加空指针检查
+            display_at_end->ShowNotification(message.c_str());
+            display_at_end->SetChatMessage("system", "");
+        } else {
+            ESP_LOGI(TAG, "Display not available: Protocol started, version: %s", ota_.GetCurrentVersion().c_str());
+        }
         // Play the success sound to indicate the device is ready
         ResetDecoder();
         PlaySound(Lang::Sounds::P3_SUCCESS);
@@ -740,8 +799,12 @@ void Application::Start() {
 void Application::OnClockTimer() {
     clock_ticks_++;
 
-    auto display = Board::GetInstance().GetDisplay();
-    display->UpdateStatusBar();
+    auto display = Board::GetInstance().GetDisplay(); // 获取显示器对象
+    if (display) { // 添加空指针检查
+        display->UpdateStatusBar(); // 修复点：添加空指针检查
+    } else {
+        ESP_LOGD(TAG, "Display not available: Skipping UpdateStatusBar in OnClockTimer.");
+    }
 
     // Print the debug info every 10 seconds
     if (clock_ticks_ % 10 == 0) {
@@ -765,7 +828,12 @@ void Application::OnClockTimer() {
                     time_t now = time(NULL);
                     char time_str[64];
                     strftime(time_str, sizeof(time_str), "%H:%M  ", localtime(&now));
-                    Board::GetInstance().GetDisplay()->SetStatus(time_str);
+                    auto display_in_lambda = Board::GetInstance().GetDisplay(); // 再次获取显示器对象
+                    if (display_in_lambda) { // 修复点：添加空指针检查
+                        display_in_lambda->SetStatus(time_str);
+                    } else {
+                        ESP_LOGD(TAG, "Display not available: Setting time status to %s.", time_str);
+                    }
                 });
             }
         }
@@ -910,18 +978,7 @@ void Application::OnAudioInput() {
 #ifdef CONFIG_USE_SERVER_AEC
         {
             std::lock_guard<std::mutex> lock(timestamp_mutex_);
-            if (!timestamp_queue_.empty()) {
-                packet.timestamp = timestamp_queue_.front();
-                timestamp_queue_.pop_front();
-            } else {
-                packet.timestamp = 0;
-            }
-
-            if (timestamp_queue_.size() > 3) { // 限制队列长度3
-                timestamp_queue_.pop_front(); // 该包发送前先出队保持队列长度
-                return;
-            }
-        }
+            timestamp_queue_.push_back(packet.timestamp);
 #endif
         std::lock_guard<std::mutex> lock(mutex_);
         if (audio_send_queue_.size() >= MAX_AUDIO_PACKETS_IN_QUEUE) {
@@ -1054,26 +1111,38 @@ void Application::SetDeviceState(DeviceState state) {
     background_task_->WaitForCompletion();
 
     auto& board = Board::GetInstance();
-    auto display = board.GetDisplay();
+    auto display = board.GetDisplay(); // 获取显示器对象
     auto led = board.GetLed();
     led->OnStateChanged();
     switch (state) {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:
-            display->SetStatus(Lang::Strings::STANDBY);
-            display->SetEmotion("neutral");
+            if (display) { // 添加空指针检查
+                display->SetStatus(Lang::Strings::STANDBY);
+                display->SetEmotion("neutral");
+            } else {
+                ESP_LOGI(TAG, "Display not available: State changed to STANDBY/IDLE.");
+            }
             audio_processor_->Stop();
             wake_word_->StartDetection();
             break;
         case kDeviceStateConnecting:
-            display->SetStatus(Lang::Strings::CONNECTING);
-            display->SetEmotion("neutral");
-            display->SetChatMessage("system", "");
+            if (display) { // 添加空指针检查
+                display->SetStatus(Lang::Strings::CONNECTING);
+                display->SetEmotion("neutral");
+                display->SetChatMessage("system", "");
+            } else {
+                ESP_LOGI(TAG, "Display not available: State changed to CONNECTING.");
+            }
             timestamp_queue_.clear();
             break;
         case kDeviceStateListening:
-            display->SetStatus(Lang::Strings::LISTENING);
-            display->SetEmotion("neutral");
+            if (display) { // 添加空指针检查
+                display->SetStatus(Lang::Strings::LISTENING);
+                display->SetEmotion("neutral");
+            } else {
+                ESP_LOGI(TAG, "Display not available: State changed to LISTENING.");
+            }
             // Update the IoT states before sending the start listening command
 #if CONFIG_IOT_PROTOCOL_XIAOZHI
             UpdateIotStates();
@@ -1098,7 +1167,11 @@ void Application::SetDeviceState(DeviceState state) {
             }
             break;
         case kDeviceStateSpeaking:
-            display->SetStatus(Lang::Strings::SPEAKING);
+            if (display) { // 添加空指针检查
+                display->SetStatus(Lang::Strings::SPEAKING);
+            } else {
+                ESP_LOGI(TAG, "Display not available: State changed to SPEAKING.");
+            }
 
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_processor_->Stop();
@@ -1213,19 +1286,31 @@ void Application::SetAecMode(AecMode mode) {
     aec_mode_ = mode;
     Schedule([this]() {
         auto& board = Board::GetInstance();
-        auto display = board.GetDisplay();
+        auto display = board.GetDisplay(); // 获取显示器对象
         switch (aec_mode_) {
         case kAecOff:
             audio_processor_->EnableDeviceAec(false);
-            display->ShowNotification(Lang::Strings::RTC_MODE_OFF);
+            if (display) { // 添加空指针检查
+                display->ShowNotification(Lang::Strings::RTC_MODE_OFF);
+            } else {
+                ESP_LOGI(TAG, "Display not available: AEC Mode OFF.");
+            }
             break;
         case kAecOnServerSide:
             audio_processor_->EnableDeviceAec(false);
-            display->ShowNotification(Lang::Strings::RTC_MODE_ON);
+            if (display) { // 添加空指针检查
+                display->ShowNotification(Lang::Strings::RTC_MODE_ON);
+            } else {
+                ESP_LOGI(TAG, "Display not available: AEC Mode ON (Server Side).");
+            }
             break;
         case kAecOnDeviceSide:
             audio_processor_->EnableDeviceAec(true);
-            display->ShowNotification(Lang::Strings::RTC_MODE_ON);
+            if (display) { // 添加空指针检查
+                display->ShowNotification(Lang::Strings::RTC_MODE_ON);
+            } else {
+                ESP_LOGI(TAG, "Display not available: AEC Mode ON (Device Side).");
+            }
             break;
         }
 
@@ -1302,7 +1387,7 @@ void Application::ShowOtaInfo(const std::string& code,const std::string& ip) {
     }};
 
     Schedule([this,code,ip](){
-        auto display = Board::GetInstance().GetDisplay();
+        auto display = Board::GetInstance().GetDisplay(); // 获取显示器对象
         std::string message;
         if (ip.empty()) {
             message = "浏览器访问\nhttp://vbota.esp32.cn/vbota\n设备码:"+code;
@@ -1310,8 +1395,12 @@ void Application::ShowOtaInfo(const std::string& code,const std::string& ip) {
             message = "浏览器访问\nhttp://vbota.esp32.cn/vbota\n或\nhttp://"+ip+"\n设备码:"+code;
         }
         
-        display->SetStatus("升级模式");
-        display->SetChatMessage("system", message.c_str());
+        if (display) { // 添加空指针检查
+            display->SetStatus("升级模式");
+            display->SetChatMessage("system", message.c_str());
+        } else {
+            ESP_LOGI(TAG, "Display not available: OTA Info - Status: 升级模式, Message: %s", message.c_str());
+        }
         PlaySound(Lang::Sounds::P3_START_OTA);
         for (const auto& digit : code) {
             auto it = std::find_if(digit_sounds.begin(), digit_sounds.end(),
@@ -1409,8 +1498,12 @@ void Application::ShowOtaInfo(const std::string& code,const std::string& ip) {
             }
             // 批量绘制当前处理的行
             auto& board = Board::GetInstance();
-            auto display = board.GetDisplay();
-            display->SetEye(0, screenY, SCREEN_WIDTH, screenY + linesToProcess, currentBuf);
+            auto display = board.GetDisplay(); // 获取显示器对象
+            if (display) { // 添加空指针检查
+                display->SetEye(0, screenY, SCREEN_WIDTH, screenY + linesToProcess, currentBuf);
+            } else {
+                ESP_LOGD(TAG, "Display not available: Skipping SetEye in drawEye.");
+            }
         }
 
         // 释放动态分配的缓冲区
