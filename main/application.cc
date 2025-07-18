@@ -45,7 +45,11 @@
 #ifndef CONFIG_AUDIO_LOOP_TASK_STACK_SIZE
 #define CONFIG_AUDIO_LOOP_TASK_STACK_SIZE (4096 * 2)
 #endif
-
+// 用于调整眼睛在“默认完全睁开”状态下的开放程度。
+// 增加这些值将使眼睑覆盖的区域更少，眼睛更露出。
+// 请根据实际效果调整这些数值，例如尝试 5, 10, 15, 20 等。
+const int EYE_DEFAULT_OPEN_OFFSET_UPPER = 100; // 调整上眼睑的开放程度
+const int EYE_DEFAULT_OPEN_OFFSET_LOWER = 10; // 调整下眼睑的开放程度
 static const char *const STATE_STRINGS[] = {
     "unknown",
     "starting",
@@ -1480,7 +1484,7 @@ int Application::random_max(int max)
 /* 对眼睛进行绘制 */
 void Application::drawEye(uint8_t e, uint32_t iScale, uint32_t scleraX, uint32_t scleraY, uint32_t uT, uint32_t lT)
 {
-    #define EYELID_COLOR 0xC618
+    #define EYELID_COLOR 0xfc0e
 
     // uint32_t start_time = esp_timer_get_time();
     // ESP_LOGI(TAG, "drawEye start");
@@ -1512,57 +1516,48 @@ void Application::drawEye(uint8_t e, uint32_t iScale, uint32_t scleraX, uint32_t
     }
 
     uint8_t bufIdx = 0;
-    // 外循环，遍历屏幕的每一批行
-    for (uint16_t screenY = 0; screenY < SCREEN_HEIGHT; screenY += LINES_PER_BATCH)
-    {
-        // 切换缓冲区
-        uint16_t *currentBuf = lineBuf[bufIdx];
-        bufIdx ^= 1; // 切换缓冲区索引
-        // 计算本次批处理的实际行数（处理到屏幕底部时可能不足10行）
-        uint8_t linesToProcess = (SCREEN_HEIGHT - screenY) < LINES_PER_BATCH ? (SCREEN_HEIGHT - screenY) : LINES_PER_BATCH;
+   // 外循环，遍历屏幕的每一批行
+        for (uint16_t screenY = 0; screenY < SCREEN_HEIGHT; screenY += LINES_PER_BATCH) {
+            // 切换缓冲区
+            uint16_t* currentBuf = lineBuf[bufIdx];
+            bufIdx ^= 1;  // 切换缓冲区索引
+            // 计算本次批处理的实际行数（处理到屏幕底部时可能不足10行）
+            uint8_t linesToProcess = (SCREEN_HEIGHT - screenY) < LINES_PER_BATCH ? (SCREEN_HEIGHT - screenY) : LINES_PER_BATCH;
 
-        // 内循环，遍历批处理的每一行
-        for (uint8_t line = 0; line < linesToProcess; line++, scleraY++, irisY++)
-        {
-            // 重置scleraX到初始值
-            scleraX = scleraXsave;
-            irisX = scleraX - (SCLERA_WIDTH - IRIS_WIDTH) / 2;
-            // 遍历屏幕的每一列
-            for (screenX = 0; screenX < SCREEN_WIDTH; screenX++, scleraX++, irisX++)
-            {
-                uint32_t screenIdx = (screenY + line) * SCREEN_WIDTH + screenX;
-                uint32_t pixelIdx = line * SCREEN_WIDTH + screenX;
+            // 内循环，遍历批处理的每一行
+            for (uint8_t line = 0; line < linesToProcess; line++, scleraY++, irisY++) {
+                // 重置scleraX到初始值
+                scleraX = scleraXsave;
+                irisX = scleraX - (SCLERA_WIDTH - IRIS_WIDTH) / 2;
+                // 遍历屏幕的每一列
+                for (screenX = 0; screenX < SCREEN_WIDTH; screenX++, scleraX++, irisX++) {
+                    uint32_t screenIdx = (screenY + line) * SCREEN_WIDTH + screenX;
+                    uint32_t pixelIdx = line * SCREEN_WIDTH + screenX;
 
-                // 判断像素点是否被遮挡
-
-                if ((lower[screenIdx] <= std::max<uint32_t>(lT - 30, 0)) ||
-                    (upper[screenIdx] <= std::max<uint32_t>(uT - 30, 0))) {
-                    p = EYELID_COLOR;
-                }
-
-
-                else if ((irisY < 0) || (irisY >= IRIS_HEIGHT) || (irisX < 0) || (irisX >= IRIS_WIDTH))
-                {
-                    p = sclera[scleraY * SCLERA_WIDTH + scleraX]; // 在巩膜中
-                }
-                else
-                {
-                    p = polar[irisY * IRIS_WIDTH + irisX]; // 极角/距离
-                    d = (iScale * (p & 0x7F)) / 240;
-                    if (d < IRIS_MAP_HEIGHT)
-                    {
-                        uint16_t a = (IRIS_MAP_WIDTH * (p >> 7)) / 512;
-                        p = iris[d * IRIS_MAP_WIDTH + a];
+                    // 判断像素点是否被遮挡
+                    if (((int32_t)lower[screenIdx] + EYE_DEFAULT_OPEN_OFFSET_LOWER <= (int32_t)lT) || \
+                        ((int32_t)upper[screenIdx] + EYE_DEFAULT_OPEN_OFFSET_UPPER <= (int32_t)uT)) {
+                        p = EYELID_COLOR;  // 被眼睑遮挡
                     }
-                    else
-                    {
-                        p = sclera[scleraY * SCLERA_WIDTH + scleraX];
+                    else if ((irisY < 0) || (irisY >= IRIS_HEIGHT) || (irisX < 0) || (irisX >= IRIS_WIDTH)) {
+                        p = sclera[scleraY * SCLERA_WIDTH + scleraX];  // 在巩膜中
                     }
+                    else if ((irisY < 0) || (irisY >= IRIS_HEIGHT) || (irisX < 0) || (irisX >= IRIS_WIDTH)) {
+                        p = sclera[scleraY * SCLERA_WIDTH + scleraX];  // 在巩膜中
+                    } else {
+                        p = polar[irisY * IRIS_WIDTH + irisX];         // 极角/距离
+                        d = (iScale * (p & 0x7F)) / 240;
+                        if (d < IRIS_MAP_HEIGHT) {
+                            uint16_t a = (IRIS_MAP_WIDTH * (p >> 7)) / 512;
+                            p = iris[d * IRIS_MAP_WIDTH + a];
+                        } else {
+                            p = sclera[scleraY * SCLERA_WIDTH + scleraX];
+                        }
+                    }
+                    // 将像素数据写入当前缓冲区
+                    currentBuf[pixelIdx] = (p >> 8) | (p << 8);
                 }
-                // 将像素数据写入当前缓冲区
-                currentBuf[pixelIdx] = (p >> 8) | (p << 8);
             }
-        }
         // 批量绘制当前处理的行
         auto &board = Board::GetInstance();
         auto display = board.GetDisplay();
@@ -1753,7 +1748,7 @@ void Application::frame(uint16_t iScale)
 
         s = (eye[eyeIndex].blink.state == DEBLINK) ? 1 + s : 256 - s;
 
-        n = (uThreshold * s + 254 * (257 - s)) / 256;
+        n = (uThreshold * s + 200 * (257 - s)) / 256;
         lThreshold = (lThreshold * s + 254 * (257 - s)) / 256;
     }
     else

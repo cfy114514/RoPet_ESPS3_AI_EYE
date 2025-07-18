@@ -8,7 +8,7 @@
 #include "iot/thing_manager.h"
 #include "led/single_led.h"
 #include "power_save_timer.h"
-
+#include <esp_timer.h>
 #include <wifi_station.h>
 #include <esp_log.h>
 #include <driver/i2c_master.h>
@@ -40,6 +40,10 @@ private:
     LcdDisplay* display_;
     VbAduioCodec audio_codec;
     PowerSaveTimer* power_save_timer_;
+     // 新增成员变量和常量
+    int64_t startup_time_ms_ = 0; // 用于记录系统启动时间（毫秒）
+    // 定义一个时间窗口，在此期间不允许通过重复按键触发配网
+    const int64_t WIFI_CONFIG_PROTECTION_TIME_MS = 10 * 1000; // 例如：10秒
 
     void InitializePowerSaveTimer() {
         power_save_timer_ = new PowerSaveTimer(-1, 60, 300);
@@ -75,17 +79,54 @@ private:
     // 初始化按钮
     void InitializeButtons() {
         // 当boot_button_被点击时，执行以下操作
-        boot_button_.OnClick([this]() {
-            // 获取应用程序实例
-            auto& app = Application::GetInstance();
-            // 如果设备状态为kDeviceStateStarting且WifiStation未连接，则重置Wifi配置
-            if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
-                ResetWifiConfiguration();
-            }
-            // 切换聊天状态
-            app.ToggleChatState();
-        });
+    boot_button_.OnClick([this]() {
+        // --- 系统保护期检查开始 ---
+        // 核心逻辑：在系统启动后的指定保护期内，不执行可能导致误触配网的逻辑。
+        // esp_timer_get_time() 返回的是微秒，所以除以 1000 转换为毫秒。
+        // WIFI_CONFIG_PROTECTION_TIME_MS 是你定义的保护期时长（例如 10000 毫秒即 10 秒）。
+        if ((esp_timer_get_time() / 1000) < WIFI_CONFIG_PROTECTION_TIME_MS) {
+            // 如果当前时间仍在保护期内，则打印警告日志。
+            ESP_LOGW(TAG, "系统启动保护期内，忽略单击触发配网。(当前时间: %lldms, 保护期: %lldms)", 
+                     esp_timer_get_time() / 1000, WIFI_CONFIG_PROTECTION_TIME_MS);
+            
+            // 重要决定点：在保护期内，除了配网，单击是否还应执行其他功能？
+            // 原始代码中 OnClick 还会执行 app.ToggleChatState()。
+            // 1. 如果你希望在保护期内**完全禁用所有单击功能**：
+            //    直接在这里 return; 即可。
+            //    return; 
+
+            // 2. 如果你希望在保护期内**只禁用配网，但允许其他功能**（例如 ToggleChatState()）：
+            //    保留 app.ToggleChatState()，就像下面这样。
+            //    这通常是更灵活的选择，允许用户即使在启动阶段也能进行一些基本交互。
+            Application::GetInstance().ToggleChatState(); // 允许切换聊天状态
+            return; // 阻止配网逻辑继续执行
+        }
+        // --- 系统保护期检查结束 ---
+        
+        // 以下是原始的 OnClick 逻辑，现在只在保护期外执行
+        auto& app = Application::GetInstance();
+        // 只有当设备处于 kDeviceStateStarting 状态且 WifiStation 未连接时，才重置 Wifi 配置。
+        // 并且，现在这个判断只有在通过了“系统保护期”检查后才会进行。
+        if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
+            ESP_LOGI(TAG, "单击触发重置Wifi配置 (已通过保护期检查)");
+            ResetWifiConfiguration();
+        }
+        // 如果在保护期外，并且你希望单击仍然能切换聊天状态，确保这里不会被上面的 if 语句中的 return 阻止。
+        // 如果在保护期内已经执行过 ToggleChatState()，这里就不需要重复执行了。
+        // 如果上面保护期内选择了 return; 那么这里就应该继续执行 ToggleChatState()
+        // 但为了避免重复，如果保护期内执行了，这里可以不执行。根据你的设计决定。
+        // 比如，为了简单，可以在保护期外，也总是执行 ToggleChatState()
+        // app.ToggleChatState(); 
+    });
          boot_button_.OnPressRepeat([this](uint16_t count) {
+             // <-- 插入以下代码
+            // 检查当前系统运行时间是否在保护期内
+            if ((esp_timer_get_time() / 1000) < WIFI_CONFIG_PROTECTION_TIME_MS) {
+            ESP_LOGW(TAG, "系统启动保护期内，忽略重复按键触发配网。(当前时间: %lldms, 保护期: %lldms)", 
+                     esp_timer_get_time() / 1000, WIFI_CONFIG_PROTECTION_TIME_MS);
+            return; // 如果在保护期内，则直接返回，不执行配网逻辑
+            }
+              // <-- 插入以上代码结束
             if(count >= 3){
                 ESP_LOGI(TAG, "重新配网");
                 ResetWifiConfiguration();
