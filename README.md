@@ -2,7 +2,7 @@
 
 *   首先致谢虾哥的开源项目：https://github.com/78/xiaozhi-esp32
 *   其次致谢：https://github.com/xinnan-tech/xiaozhi-esp32-server
-
+Build for esps3 ai without eye()
 
 ## 项目简介
 ESP32-S3作为主控，驱动两个1.28寸双目，并且支持4个触目节点，软件硬件全开源
