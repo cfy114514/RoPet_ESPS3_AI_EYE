@@ -37,7 +37,20 @@
 //     LV_FONT_DECLARE(font_puhui_14_1);
 //     LV_FONT_DECLARE(font_awesome_14_1);
 // #endif
+// 👇 在文件顶部添加这个任务函数
+void auto_wakeup_task(void *arg) {
+    // 循环等待，直到应用状态变为空闲
+    while (Application::GetInstance().GetDeviceState() != kDeviceStateIdle) {
+        vTaskDelay(pdMS_TO_TICKS(100)); // 每 100 毫秒检查一次
+    }
 
+    // 状态已就绪，执行唤醒
+    ESP_LOGI("AutoWakeupTask", "Application is idle, invoking wake word.");
+    Application::GetInstance().WakeWordInvoke("你好小智");
+
+    // 任务完成，删除自身
+    vTaskDelete(NULL);
+}
 class CompactWifiBoardLCD : public WifiBoard {
 private:
     // 禁用LCD显示功能，注释掉LCD相关的成员变量
@@ -101,46 +114,26 @@ private:
     }
 
     // 初始化按钮
-    void InitializeButtons() {
-        // 当boot_button_被点击时，执行以下操作
-        boot_button_.OnClick([this]() {
-            // --- 系统保护期检查开始 ---
-            // 核心逻辑：在系统启动后的指定保护期内，不执行可能导致误触配网的逻辑。
-            // esp_timer_get_time() 返回的是微秒，所以除以 1000 转换为毫秒。
-            // WIFI_CONFIG_PROTECTION_TIME_MS 是你定义的保护期时长（例如 10000 毫秒即 10 秒）。
-            if ((esp_timer_get_time() / 1000) < WIFI_CONFIG_PROTECTION_TIME_MS) {
-                // 如果当前时间仍在保护期内，则打印警告日志。
-                ESP_LOGW(TAG, "系统启动保护期内，忽略单击触发配网。(当前时间: %lldms, 保护期: %lldms)", 
-                            esp_timer_get_time() / 1000, WIFI_CONFIG_PROTECTION_TIME_MS);
-                
-                // 重要决定点：在保护期内，除了配网，单击是否还应执行其他功能？
-                // 原始代码中 OnClick 还会执行 app.ToggleChatState()。
-                // 1. 如果你希望在保护期内**完全禁用所有单击功能**：
-                //    直接在这里 return; 即可。
-                //    return; 
+void InitializeButtons() {
+    // 当boot_button_被点击时，执行以下操作
+    boot_button_.OnClick([this]() {
+        auto& app = Application::GetInstance();
+        int64_t current_time_ms = esp_timer_get_time() / 1000;
+        
+        // 核心逻辑：无论是否在保护期内，单击都应该执行切换监听状态。
+        app.ToggleChatState(); 
 
-                // 2. 如果你希望在保护期内**只禁用配网，但允许其他功能**（例如 ToggleChatState()）：
-                //    保留 app.ToggleChatState()，就像下面这样。
-                //    这通常是更灵活的选择，允许用户即使在启动阶段也能进行一些基本交互。
-                Application::GetInstance().ToggleChatState(); // 允许切换聊天状态
-                return; // 阻止配网逻辑继续执行
-            }
-            // --- 系统保护期检查结束 ---
-            
-            // 以下是原始的 OnClick 逻辑，现在只在保护期外执行
-            auto& app = Application::GetInstance();
-            // 只有当设备处于 kDeviceStateStarting 状态且 WifiStation 未连接时，才重置 Wifi 配置。
-            // 并且，现在这个判断只有在通过了“系统保护期”检查后才会进行。
+        // 仅在设备处于特定状态且不在保护期内时，才执行 Wi-Fi 配置重置。
+        if (current_time_ms >= WIFI_CONFIG_PROTECTION_TIME_MS) {
             if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
                 ESP_LOGI(TAG, "单击触发重置Wifi配置 (已通过保护期检查)");
                 ResetWifiConfiguration();
             }
-            // 如果在保护期外，并且你希望单击仍然能切换聊天状态，确保这里不会被上面的 if 语句中的 return 阻止。
-            // 如果在保护期内已经执行过 ToggleChatState()，这里就不需要重复执行了。
-            // 如果上面保护期内选择了 return; 那么这里就应该继续执行 ToggleChatState()
-            // 但为了避免重复，为了简单，可以在保护期外，也总是执行 ToggleChatState()
-            // app.ToggleChatState(); 
-        });
+        } else {
+             ESP_LOGW(TAG, "系统启动保护期内，忽略单击触发配网。(当前时间: %lldms, 保护期: %lldms)", 
+                      current_time_ms, WIFI_CONFIG_PROTECTION_TIME_MS);
+        }
+    });
 
         boot_button_.OnPressRepeat([this](uint16_t count) { 
             // <-- 插入以下代码
@@ -151,7 +144,7 @@ private:
                 return; // 如果在保护期内，则直接返回，不执行配网逻辑
             }
             // <-- 插入以上代码结束
-            if(count >= 5){
+            if(count >= 3){
                 ESP_LOGI(TAG, "重新配网");
                 ResetWifiConfiguration();
             }
@@ -159,7 +152,8 @@ private:
         #if (defined(CONFIG_VB6824_OTA_SUPPORT) && CONFIG_VB6824_OTA_SUPPORT == 1)
             boot_button_.OnDoubleClick([this]() {
             if (esp_timer_get_time() > 20 * 1000 * 1000) {
-                ESP_LOGI(TAG, "Long press, do not enter OTA mode %ld", (uint32_t)esp_timer_get_time());
+                ESP_LOGI(TAG, "Long press, do not enter OTA mode 
+                    %ld", (uint32_t)esp_timer_get_time());
                 return;
             }
             audio_codec.OtaStart(0);
@@ -280,7 +274,7 @@ public:
                 ResetWifiConfiguration();
             }
         });
-
+        xTaskCreate(auto_wakeup_task, "auto_wakeup", 2048, NULL, 5, NULL);
     }
 
     virtual Led* GetLed() override {
