@@ -46,7 +46,7 @@ void auto_wakeup_task(void *arg) {
 
     // 状态已就绪，执行唤醒
     ESP_LOGI("AutoWakeupTask", "Application is idle, invoking wake word.");
-    Application::GetInstance().WakeWordInvoke("你好小智");
+    Application::GetInstance().WakeWordInvoke("你好秦彻");
 
     // 任务完成，删除自身
     vTaskDelete(NULL);
@@ -267,7 +267,7 @@ public:
         audio_codec.OnWakeUp([this](const std::string& command) {
             if (command == std::string(vb6824_get_wakeup_word())){
                 if(Application::GetInstance().GetDeviceState() != kDeviceStateListening){
-                    Application::GetInstance().WakeWordInvoke("你好小智");
+                    Application::GetInstance().WakeWordInvoke("你好秦彻");
                 }
             }else if (command == "开始配网"){
                 ESP_LOGI(TAG,"fff");
