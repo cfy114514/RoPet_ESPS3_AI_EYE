@@ -152,8 +152,7 @@ void InitializeButtons() {
         #if (defined(CONFIG_VB6824_OTA_SUPPORT) && CONFIG_VB6824_OTA_SUPPORT == 1)
             boot_button_.OnDoubleClick([this]() {
             if (esp_timer_get_time() > 20 * 1000 * 1000) {
-                ESP_LOGI(TAG, "Long press, do not enter OTA mode 
-                    %ld", (uint32_t)esp_timer_get_time());
+                ESP_LOGI(TAG, "Long press, do not enter OTA mode %ld", (uint32_t)esp_timer_get_time());
                 return;
             }
             audio_codec.OtaStart(0);
