@@ -1,6 +1,12 @@
+/*
+ * @Description:
+ * @Author: cjs丶
+ * @Date: 2025-07-16 18:56:37
+ * @LastEditTime: 2025-08-02 16:18:19
+ * @LastEditors: cjs丶
+ */
 #ifndef _WEBSOCKET_PROTOCOL_H_
 #define _WEBSOCKET_PROTOCOL_H_
-
 
 #include "protocol.h"
 
@@ -10,24 +16,26 @@
 
 #define WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT (1 << 0)
 
-class WebsocketProtocol : public Protocol {
+class WebsocketProtocol : public Protocol
+{
 public:
     WebsocketProtocol();
     ~WebsocketProtocol();
 
     bool Start() override;
-    bool SendAudio(const AudioStreamPacket& packet) override;
+    bool SendAudio(const AudioStreamPacket &packet) override;
     bool OpenAudioChannel() override;
     void CloseAudioChannel() override;
     bool IsAudioChannelOpened() const override;
+    bool SendText(const std::string &text) override;
 
 private:
     EventGroupHandle_t event_group_handle_;
-    WebSocket* websocket_ = nullptr;
+    WebSocket *websocket_ = nullptr;
     int version_ = 1;
 
-    void ParseServerHello(const cJSON* root);
-    bool SendText(const std::string& text) override;
+    void ParseServerHello(const cJSON *root);
+
     std::string GetHelloMessage();
 };
 

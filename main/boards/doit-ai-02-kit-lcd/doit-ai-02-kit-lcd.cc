@@ -24,70 +24,75 @@
 
 #include "esp_timer.h"
 
+#include "csi_controller.h"
+
 #define TAG "CustomBoard"
 
 LV_FONT_DECLARE(font_puhui_16_4);
 LV_FONT_DECLARE(font_awesome_16_4);
 
-class CustomBoard : public WifiBoard {
+class CustomBoard : public WifiBoard
+{
 private:
     Button boot_button_;
     Button volume_up_button_;
     Button volume_down_button_;
     VbAduioCodec audio_codec;
-    LcdDisplay* display;
+    LcdDisplay *display;
 
-    void InitializeButtons() {
-        boot_button_.OnClick([this]() {
+    void InitializeButtons()
+    {
+        boot_button_.OnClick([this]()
+                             {
             auto &app = Application::GetInstance();
-            app.ToggleChatState();
-        });
-        boot_button_.OnPressRepeaDone([this](uint16_t count) {
+            app.ToggleChatState(); });
+        boot_button_.OnPressRepeaDone([this](uint16_t count)
+                                      {
             if(count >= 3){
                 ResetWifiConfiguration();
-            }
-        });
+            } });
 
-        volume_up_button_.OnClick([this]() {
+        volume_up_button_.OnClick([this]()
+                                  {
             auto codec = GetAudioCodec();
             auto volume = codec->output_volume() + 10;
             if (volume > 100) {
                 volume = 100;
             }
             codec->SetOutputVolume(volume);
-            GetDisplay()->ShowNotification(Lang::Strings::VOLUME + std::to_string(volume));
-        });
+            GetDisplay()->ShowNotification(Lang::Strings::VOLUME + std::to_string(volume)); });
 
-        volume_up_button_.OnLongPress([this]() {
+        volume_up_button_.OnLongPress([this]()
+                                      {
             GetAudioCodec()->SetOutputVolume(100);
-            GetDisplay()->ShowNotification(Lang::Strings::MAX_VOLUME);
-        });
+            GetDisplay()->ShowNotification(Lang::Strings::MAX_VOLUME); });
 
-        volume_down_button_.OnClick([this]() {
+        volume_down_button_.OnClick([this]()
+                                    {
             auto codec = GetAudioCodec();
             auto volume = codec->output_volume() - 10;
             if (volume < 0) {
                 volume = 0;
             }
             codec->SetOutputVolume(volume);
-            GetDisplay()->ShowNotification(Lang::Strings::VOLUME + std::to_string(volume));
-        });
+            GetDisplay()->ShowNotification(Lang::Strings::VOLUME + std::to_string(volume)); });
 
-        volume_down_button_.OnLongPress([this]() {
+        volume_down_button_.OnLongPress([this]()
+                                        {
             GetAudioCodec()->SetOutputVolume(0);
-            GetDisplay()->ShowNotification(Lang::Strings::MUTED);
-        });
-
+            GetDisplay()->ShowNotification(Lang::Strings::MUTED); });
     }
 
     // 物联网初始化，添加对 AI 可见设备
-    void InitializeIot() {
-        auto& thing_manager = iot::ThingManager::GetInstance();
+    void InitializeIot()
+    {
+        auto &thing_manager = iot::ThingManager::GetInstance();
         thing_manager.AddThing(iot::CreateThing("Speaker"));
         thing_manager.AddThing(iot::CreateThing("Screen"));
     }
 
-    void InitializeSpi() {
+    void InitializeSpi()
+    {
         spi_bus_config_t buscfg = {};
         buscfg.mosi_io_num = DISPLAY_MOSI_PIN;
         buscfg.miso_io_num = GPIO_NUM_NC;
@@ -98,7 +103,8 @@ private:
         ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
     }
 
-    void InitializeLcdDisplay() {
+    void InitializeLcdDisplay()
+    {
         esp_lcd_panel_io_handle_t panel_io = nullptr;
         esp_lcd_panel_handle_t panel = nullptr;
         esp_lcd_panel_io_spi_config_t io_config = {};
@@ -126,7 +132,7 @@ private:
         esp_lcd_panel_invert_color(panel, DISPLAY_INVERT_COLOR);
         esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY);
         esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
-        display = new SpiLcdDisplay(panel_io, panel, 
+        display = new SpiLcdDisplay(panel_io, panel,
                                     DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY,
                                     {
                                         .text_font = &font_puhui_16_4,
@@ -136,42 +142,98 @@ private:
     }
 
 public:
-    CustomBoard() : 
-            boot_button_(BOOT_BUTTON_GPIO, false), 
-            volume_up_button_(VOLUME_UP_BUTTON_GPIO),
-            volume_down_button_(VOLUME_DOWN_BUTTON_GPIO),
-            audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO){          
+    CustomBoard() : boot_button_(BOOT_BUTTON_GPIO, false),
+                    volume_up_button_(VOLUME_UP_BUTTON_GPIO),
+                    volume_down_button_(VOLUME_DOWN_BUTTON_GPIO),
+                    audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO)
+    {
 
         InitializeButtons();
         InitializeSpi();
         InitializeLcdDisplay();
         GetBacklight()->RestoreBrightness();
         InitializeIot();
-        audio_codec.OnWakeUp([this](const std::string& command) {
+        audio_codec.OnWakeUp([this](const std::string &command)
+                             {
             if (command == std::string(vb6824_get_wakeup_word())){
                 if(Application::GetInstance().GetDeviceState() != kDeviceStateListening){
                     Application::GetInstance().WakeWordInvoke("你好小智");
                 }
             }else if (command == "开始配网"){
                 ResetWifiConfiguration();
-            }
-        });
+            } });
     }
 
-    virtual AudioCodec* GetAudioCodec() override {
+    virtual AudioCodec *GetAudioCodec() override
+    {
         return &audio_codec;
     }
 
-    virtual Display* GetDisplay() override {
+    virtual Display *GetDisplay() override
+    {
         return display;
     }
 
-    virtual Backlight* GetBacklight() override {
-        if (DISPLAY_BACKLIGHT_PIN != GPIO_NUM_NC) {
+    virtual Backlight *GetBacklight() override
+    {
+        if (DISPLAY_BACKLIGHT_PIN != GPIO_NUM_NC)
+        {
             static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
             return &backlight;
         }
         return nullptr;
+    }
+
+    virtual void StartNetwork() override
+    {
+
+        // User can press BOOT button while starting to enter WiFi configuration mode
+        if (wifi_config_mode_)
+        {
+            EnterWifiConfigMode();
+            return;
+        }
+
+        // If no WiFi SSID is configured, enter WiFi configuration mode
+        auto &ssid_manager = SsidManager::GetInstance();
+        auto ssid_list = ssid_manager.GetSsidList();
+        if (ssid_list.empty())
+        {
+            wifi_config_mode_ = true;
+            EnterWifiConfigMode();
+            return;
+        }
+
+        auto &wifi_station = WifiStation::GetInstance();
+        wifi_station.OnScanBegin([this]()
+                                 {
+        auto display = Board::GetInstance().GetDisplay();
+        display->ShowNotification(Lang::Strings::SCANNING_WIFI, 30000); });
+        wifi_station.OnConnect([this](const std::string &ssid)
+                               {
+        auto display = Board::GetInstance().GetDisplay();
+        std::string notification = Lang::Strings::CONNECT_TO;
+        notification += ssid;
+        notification += "...";
+        display->ShowNotification(notification.c_str(), 30000); });
+        wifi_station.OnConnected([this](const std::string &ssid)
+                                 {
+        auto display = Board::GetInstance().GetDisplay();
+        std::string notification = Lang::Strings::CONNECTED_TO;
+        notification += ssid;
+        display->ShowNotification(notification.c_str(), 30000);
+        // 初始化CSI
+        CSIController::GetInstance().Init(); });
+        wifi_station.Start();
+
+        // Try to connect to WiFi, if failed, launch the WiFi configuration AP
+        if (!wifi_station.WaitForConnected(60 * 1000))
+        {
+            wifi_station.Stop();
+            wifi_config_mode_ = true;
+            EnterWifiConfigMode();
+            return;
+        }
     }
 };
 

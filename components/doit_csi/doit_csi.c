@@ -1,4 +1,4 @@
-/*   unified_csi_radar.c
+/*   csi_radar.c
  *  功能：
  *  1. 上电自动连接 Wi-Fi（使用 example_connect）
  *  2. 连接成功后等待用户按下 BOOT 键(GPIO0)，低电平有效
@@ -15,47 +15,9 @@
 
 static const char *TAG = "Doit_Csi";
 
-/**
- * 准备扫描定时器回调
- */
-static void pre_countdown_cb(TimerHandle_t t)
-{
-    ESP_LOGI(TAG, "准备校准倒计时 %d 秒...", g_pre_calib_countdown_left);
-    if (--g_pre_calib_countdown_left == 0)
-    {
-        xTimerStop(g_pre_calib_countdown_timer, 0);
-        // xTimerDelete(g_pre_calib_countdown_timer, 0);
-        // g_pre_calib_countdown_timer = NULL;
-        ESP_LOGI(TAG, "准备校准倒计时结束，开始 CSI 校准，持续 %d 秒...", CALIB_TIME_SEC);
-
-        xTimerStart(g_pre_calib_countdown_timer, 0);
-        /* 启动雷达训练（校准） */
-        esp_radar_train_start();
-    }
-}
-
-/**
- * 校准定时器回调
- */
-static void calib_done_cb(TimerHandle_t t)
-{
-    ESP_LOGI(TAG, "校准完成倒计时 %d 秒...", g_start_calib_countdown_left);
-    if (--g_start_calib_countdown_left == 0)
-    {
-        xTimerStop(g_start_calib_countdown_timer, 0);
-        // xTimerDelete(g_start_calib_countdown_timer, 0);
-        // g_start_calib_countdown_timer = NULL;
-        ESP_LOGI(TAG, "倒计时结束，校准已完成，开始CSI检测...");
-
-        /* 停止训练，获取阈值 */
-        float someone_thr, move_thr;
-        esp_radar_train_stop(&someone_thr, &move_thr);
-        ESP_LOGI(TAG, "校准完成！有人阈值=%.6f，运动阈值=%.6f", someone_thr, move_thr);
-
-        /* 启动 CSI 采集与雷达实时检测 */
-        start_csi_radar();
-    }
-}
+// 添加状态计数器
+static uint32_t s_state_count = 0;
+static uint32_t s_state_change = true;
 
 /**
  * ping触发路由发送任务
@@ -112,7 +74,6 @@ static void trigger_router_send_data_task(void *arg)
 
     ESP_ERROR_CHECK(esp_wifi_config_80211_tx_rate(WIFI_IF_STA, WIFI_PHY_RATE_6M));
 
-    vTaskSuspend(NULL);
     while (true)
     {
         esp_err_t ret = esp_wifi_80211_tx(WIFI_IF_STA, &null_data, sizeof(wifi_null_data_t), true);
@@ -154,136 +115,83 @@ static void trigger_router_send_data_task(void *arg)
     vTaskDelete(NULL);
 }
 
-/**
- * CSI 数据打印任务
- */
-static void csi_data_print_task(void *arg)
-{
-    wifi_csi_filtered_info_t *info = NULL;
-    char *buffer = malloc(8 * 1024);
-    static uint32_t count = 0;
-
-    vTaskSuspend(NULL);
-    while (xQueueReceive(g_csi_info_queue, &info, portMAX_DELAY))
-    {
-        size_t len = 0;
-        wifi_pkt_rx_ctrl_t *rx_ctrl = &info->rx_ctrl;
-
-        if (!count)
-        {
-            ESP_LOGI(TAG, "================ CSI RECV ================");
-            len += sprintf(buffer + len, "type,sequence,timestamp,taget_seq,taget,mac,rssi,rate,sig_mode,mcs,bandwidth,smoothing,not_sounding,aggregation,stbc,fec_coding,sgi,noise_floor,ampdu_cnt,channel,secondary_channel,local_timestamp,ant,sig_len,rx_state,agc_gain,fft_gain,len,first_word,data\n");
-        }
-
-        if (!strcasecmp(g_console_input_config.csi_output_type, "LLFT"))
-        {
-            info->valid_len = info->valid_llft_len;
-        }
-        else if (!strcasecmp(g_console_input_config.csi_output_type, "HT-LFT"))
-        {
-            info->valid_len = info->valid_llft_len + info->valid_ht_lft_len;
-        }
-        else if (!strcasecmp(g_console_input_config.csi_output_type, "STBC-HT-LTF"))
-        {
-            info->valid_len = info->valid_llft_len + info->valid_ht_lft_len + info->valid_stbc_ht_lft_len;
-        }
-
-        len += sprintf(buffer + len, "CSI_DATA,%lu,%lu,%lu,%s," MACSTR ",%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%u,%d,%d,%d,%d,%d,%d,%d,",
-                       count++, esp_log_timestamp(), g_console_input_config.collect_number, g_console_input_config.collect_taget,
-                       MAC2STR(info->mac), rx_ctrl->rssi, rx_ctrl->rate, rx_ctrl->sig_mode,
-                       rx_ctrl->mcs, rx_ctrl->cwb, rx_ctrl->smoothing, rx_ctrl->not_sounding,
-                       rx_ctrl->aggregation, rx_ctrl->stbc, rx_ctrl->fec_coding, rx_ctrl->sgi,
-                       rx_ctrl->noise_floor, rx_ctrl->ampdu_cnt, rx_ctrl->channel, rx_ctrl->secondary_channel,
-                       rx_ctrl->timestamp, rx_ctrl->ant, rx_ctrl->sig_len, rx_ctrl->rx_state, info->agc_gain, info->fft_gain, info->valid_len, 0);
-
-        if (!strcasecmp(g_console_input_config.csi_output_format, "base64"))
-        {
-            size_t size = 0;
-            mbedtls_base64_encode((uint8_t *)buffer + len, sizeof(buffer) - len, &size, (uint8_t *)info->valid_data, info->valid_len);
-            len += size;
-            len += sprintf(buffer + len, "\n");
-        }
-        else
-        {
-            len += sprintf(buffer + len, "\"[%d", info->valid_data[0]);
-
-            for (int i = 1; i < info->valid_len; i++)
-            {
-                len += sprintf(buffer + len, ",%d", info->valid_data[i]);
-            }
-
-            len += sprintf(buffer + len, "]\"\n");
-        }
-
-        printf("%s", buffer);
-        free(info);
-    }
-
-    free(buffer);
-    vTaskDelete(NULL);
-}
-
 static void wifi_radar_cb(const wifi_radar_info_t *info, void *ctx)
 {
-    ESP_LOGI(TAG, "qwe");
+    ESP_LOGI(TAG, "Radar callback triggered, wander=%.6f", info->waveform_wander);
     static float *s_buff_wander = NULL;
     static float *s_buff_jitter = NULL;
     static uint32_t s_buff_count = 0;
-    uint32_t buff_max_size = g_console_input_config.predict_buff_size;
-    uint32_t buff_outliers_num = g_console_input_config.predict_outliers_number;
+    uint32_t buff_max_size = g_console_input_config.predict_buff_size;           //  定义雷达信息缓冲区最大长度和异常值数量
+    uint32_t buff_outliers_num = g_console_input_config.predict_outliers_number; //  定义雷达信息缓冲区最大长度和异常值数量
     uint32_t someone_count = 0;
     uint32_t move_count = 0;
-    bool room_status = false;
-    bool human_status = false;
+    bool room_status = false;  // 房间状态
+    bool human_status = false; // 人运动状态
 
     if (!s_buff_wander)
     {
-        s_buff_wander = calloc(RADAR_BUFF_MAX_LEN, sizeof(float));
+        s_buff_wander = calloc(RADAR_BUFF_MAX_LEN, sizeof(float)); // 存储雷达检测到的波形漂移（wander）
     }
 
     if (!s_buff_jitter)
     {
-        s_buff_jitter = calloc(RADAR_BUFF_MAX_LEN, sizeof(float));
+        s_buff_jitter = calloc(RADAR_BUFF_MAX_LEN, sizeof(float)); // 存储雷达检测到的波形抖动（jitter）数据
     }
 
-    s_buff_wander[s_buff_count % RADAR_BUFF_MAX_LEN] = info->waveform_wander;
-    s_buff_jitter[s_buff_count % RADAR_BUFF_MAX_LEN] = info->waveform_jitter;
+    s_buff_wander[s_buff_count % RADAR_BUFF_MAX_LEN] = info->waveform_wander; // 将当前检测到的波形漂移（wander）数据存储到缓冲区
+    s_buff_jitter[s_buff_count % RADAR_BUFF_MAX_LEN] = info->waveform_jitter; // 将当前检测到的波形抖动（jitter）数据存储到缓冲区
     s_buff_count++;
 
-    if (s_buff_count < buff_max_size)
+    if (s_buff_count < buff_max_size) //  如果缓冲区中的数据量小于最大长度，则继续存储
     {
         return;
     }
 
-    extern float trimmean(const float *array, size_t len, float percent);
-    extern float median(const float *a, size_t len);
+    extern float trimmean(const float *array, size_t len, float percent); //  声明外部函数，用于计算数组的截断均值
+    extern float median(const float *a, size_t len);                      //  声明外部函数，用于计算数组的中位数
 
-    float wander_average = trimmean(s_buff_wander, RADAR_BUFF_MAX_LEN, 0.5);
-    float jitter_midean = median(s_buff_jitter, RADAR_BUFF_MAX_LEN);
+    float wander_average = trimmean(s_buff_wander, RADAR_BUFF_MAX_LEN, 0.5); //  计算s_buff_wander数组中去除50%元素后的平均值
+    float jitter_midean = median(s_buff_jitter, RADAR_BUFF_MAX_LEN);         //  计算s_buff_jitter数组的中位数
 
     for (int i = 0; i < buff_max_size; i++)
     {
         uint32_t index = (s_buff_count - 1 - i) % RADAR_BUFF_MAX_LEN;
 
-        if ((wander_average * g_console_input_config.predict_someone_sensitivity > g_console_input_config.predict_someone_threshold))
+        if ((wander_average * g_console_input_config.predict_someone_sensitivity > g_console_input_config.predict_someone_threshold)) //  如果wander_average乘以.predict_someone_sensitivity大于预测有人阈值，则someone_count加1
         {
             someone_count++;
         }
+        else
+        {
+            ESP_LOGI(TAG, "wander_average = %f,predict_someone_sensitivity=[%f],predict_someone_threshold=[%f]", wander_average, g_console_input_config.predict_someone_sensitivity, g_console_input_config.predict_someone_threshold);
+        }
 
-        if (s_buff_jitter[index] * g_console_input_config.predict_move_sensitivity > g_console_input_config.predict_move_threshold || (s_buff_jitter[index] * g_console_input_config.predict_move_sensitivity > jitter_midean && s_buff_jitter[index] > 0.0002))
+        if (s_buff_jitter[index] * g_console_input_config.predict_move_sensitivity > g_console_input_config.predict_move_threshold || (s_buff_jitter[index] * g_console_input_config.predict_move_sensitivity > jitter_midean && s_buff_jitter[index] > 0.0002)) //  如果s_buff_jitter数组中当前元素的值乘以预测移动敏感度大于预测移动阈值，或者当前元素的值乘以预测移动敏感度大于jitter_midean且当前元素的值大于0.0002，则move_count加1
         {
             move_count++;
         }
+        // else
+        // {
+        //     ESP_LOGI(TAG, "s_buff_jitter[%lu] = %f,predict_move_sensitivity=[%f],predict_move_threshold=[%f],jitter_midean=[%f]", index, s_buff_jitter[index], g_console_input_config.predict_move_sensitivity, g_console_input_config.predict_move_threshold, jitter_midean);
+        // }
     }
 
-    if (someone_count >= 1)
+    if (someone_count >= 1) //  如果someone_count大于等于1，则说明有人移动
     {
         room_status = true;
     }
+    else
+    {
+        room_status = false;
+    }
 
-    if (move_count >= buff_outliers_num)
+    if (move_count >= buff_outliers_num) //  如果移动次数大于等于异常值数量，则设置human_status为true
     {
         human_status = true;
+    }
+    else
+    {
+        human_status = false;
     }
 
     static uint32_t s_count = 0;
@@ -302,12 +210,12 @@ static void wifi_radar_cb(const wifi_radar_info_t *info, void *ctx)
         strncpy(timestamp_str, (char *)ctx, 31);
     }
 
-    static uint32_t s_last_move_time = 0;
-    static uint32_t s_last_someone_time = 0;
+    static uint32_t s_last_move_time = 0;    //  定义一个静态的32位无符号整数变量s_last_move_time，用于记录上次移动的时间
+    static uint32_t s_last_someone_time = 0; //  定义一个静态的32位无符号整数变量，用于存储上一次有人操作的时间
 
-    if (g_console_input_config.train_start)
+    if (g_console_input_config.train_start) //  如果训练开始
     {
-        s_last_move_time = esp_log_timestamp();
+        s_last_move_time = esp_log_timestamp(); //  获取当前时间戳，并赋值给s_last_move_time和s_last_someone_time
         s_last_someone_time = esp_log_timestamp();
 
         // static bool led_status = false;
@@ -326,7 +234,19 @@ static void wifi_radar_cb(const wifi_radar_info_t *info, void *ctx)
         return;
     }
 
-    printf("RADAR_DADA,%lu,%s,%.6f,%.6f,%.6f,%d,%.6f,%.6f,%.6f,%d\n", s_count++, timestamp_str,
+    /**
+     * s_count:数据序列号
+     * timestamp_str:时间戳
+     * info->waveform_wander:当前波形漂移值
+     * wander_average:波形漂移的平均值。
+     * g_console_input_config.predict_someone_threshold / g_console_input_config.predict_someone_sensitivity，校准后的“有人”阈值。
+     * room_status:房间状态,1表示有人。
+     * info->waveform_jitter:当前波形抖动值
+     * jitter_midean:波形抖动的平均值。
+     * jitter_midean / g_console_input_config.predict_move_sensitivity，校准后的“移动”阈值。
+     * human_status:，人运动状态（1 表示有人在运动）。
+     */
+    printf("RADAR_DADA,|s_count=%lu|,|timestamp_str=%s|,|waveform_wander=%.6f|,|wander_average=%.6f|,|after_calib_room_threshold=%.6f|,|room_status=%d|,|waveform_jitter=%.6f|,\r\n|jitter_midean=%.6f|,|after_calib_move_threshold=%.6f|,|human_status=%d|\n", s_count++, timestamp_str,
            info->waveform_wander, wander_average, g_console_input_config.predict_someone_threshold / g_console_input_config.predict_someone_sensitivity, room_status,
            info->waveform_jitter, jitter_midean, jitter_midean / g_console_input_config.predict_move_sensitivity, human_status);
 
@@ -359,6 +279,73 @@ static void wifi_radar_cb(const wifi_radar_info_t *info, void *ctx)
             // ws2812_led_set_rgb(0, 0, 0);
         }
     }
+
+    // if (room_status != last_room_status || human_status != last_human_status)
+    // {
+    //     if (g_human_status_cb)
+    //     {
+    //         g_human_status_cb(room_status, human_status);
+    //     }
+    //     last_room_status = room_status;
+    //     last_human_status = human_status;
+    // }
+
+    // 判断状态是否改变
+    ESP_LOGI(TAG, "room_status=%d, human_status=%d,last_room_status=%d, last_human_status=%d", room_status, human_status, last_room_status, last_human_status);
+
+    // ===== 新增状态防抖机制 =====
+    static uint32_t last_real_change_time = 0;  // 记录上次确认的真实状态变化时间
+    const uint32_t DEBOUNCE_TIME_MS = 300;      // 防抖时间窗口（300ms）
+    const uint8_t CONFIRM_COUNT_THRESHOLD = 10; // 连续确认次数阈值
+
+    // 1. 状态变化检测（带防抖）
+    bool current_state_changed = (room_status != last_room_status ||
+                                  human_status != last_human_status);
+
+    // 2. 防抖处理 - 忽略短时间内的状态波动
+    if (current_state_changed)
+    {
+        uint32_t now = esp_log_timestamp();
+
+        // 如果两次变化间隔太短，视为抖动
+        if (now - last_real_change_time < DEBOUNCE_TIME_MS)
+        {
+            ESP_LOGD(TAG, "状态抖动过滤: %lums内变化", (now - last_real_change_time));
+            return; // 直接返回，不处理此次变化
+        }
+        last_real_change_time = now;
+    }
+
+    if (room_status != last_room_status || human_status != last_human_status)
+    {
+        // 3. 状态确认变化时初始化计数器
+        s_state_count = 1;
+        s_state_change = true;
+        ESP_LOGI(TAG, "状态变化检测，开始确认计数");
+    }
+    else
+    {
+        // 4. 状态未变时递增计数器
+        s_state_count++;
+    }
+
+    // 5. 状态确认（要求连续多次相同状态）
+    if (s_state_count >= CONFIRM_COUNT_THRESHOLD && s_state_change)
+    {
+        if (g_human_status_cb)
+        {
+            // 6. 执行回调前记录最终确认的状态
+            ESP_LOGI(TAG, "状态稳定确认(连续%d次)，执行回调", CONFIRM_COUNT_THRESHOLD);
+            g_human_status_cb(room_status, human_status);
+
+            // 7. 重置状态变化标志
+            s_state_change = false;
+        }
+    }
+
+    // 更新历史状态
+    last_room_status = room_status;
+    last_human_status = human_status;
 }
 
 /**
@@ -366,6 +353,7 @@ static void wifi_radar_cb(const wifi_radar_info_t *info, void *ctx)
  */
 void doit_csi_init(void)
 {
+
     /* ---------- 初始化雷达库 ---------- */
     esp_radar_init();
     wifi_radar_config_t radar_config = WIFI_RADAR_CONFIG_DEFAULT();
@@ -373,38 +361,10 @@ void doit_csi_init(void)
     radar_config.csi_recv_interval = g_send_data_interval; // 它决定了“每隔多少毫秒向路由器发一次数据包”，以便触发路由器回包，从而拿到一份新的 CSI 数据。
 
     // 当宏 WIFI_CSI_SEND_NULL_DATA_ENABLE 被定义成 1 时，才把 dump_ack_en 设为 true，从而让 Wi-Fi 驱动把 ACK（握手应答帧） 的 CSI 也一并采集并上报,普通数据帧（Ping、Null Data）已经能提供 CSI，但 ACK 帧是路由器→ESP32 的下行帧，也能携带 CSI。打开后 CSI 采样量翻倍（上行 + 下行），时间分辨率更高 → 适合做 高精度呼吸/微动检测。
-
+    // radar_config.csi_config.channel_filter_en = true;
 #if WIFI_CSI_SEND_NULL_DATA_ENABLE
     radar_config.csi_config.dump_ack_en = true;
 #endif
-
-    // // 1.准备校准定时器
-    // if (!g_pre_calib_countdown_timer)
-    // {
-    //     xTimerCreate("pre_calib_countdown", pdMS_TO_TICKS(1000), pdTRUE, NULL, pre_countdown_cb);
-    // }
-
-    // /* 2. 把校准定时器 */
-    // if (!calib_done_cb)
-    // {
-    //     g_start_calib_countdown_timer = xTimerCreate("start_calib_countdown", pdMS_TO_TICKS(1000), pdTRUE, NULL, calib_done_cb);
-    // }
-
-    /* 创建 CSI 打印任务（官方实现，避免阻塞回调） */
-    if (!g_csi_info_queue)
-    {
-        g_csi_info_queue = xQueueCreate(64, sizeof(void *));
-    }
-
-    // if (!csi_data_print_task_handler)
-    // {
-    //     xTaskCreate(csi_data_print_task, "csi_data_print", 4 * 1024, NULL, 0, &csi_data_print_task_handler);
-    // }
-
-    if (!trigger_router_send_data_task_handler)
-    {
-        xTaskCreate(trigger_router_send_data_task, "trigger_router_send_data", 4 * 1024, NULL, 5, &trigger_router_send_data_task_handler);
-    }
 
     /* 只接收路由器 CSI，MAC 前缀随意填，后续会被替换 */
     memcpy(radar_config.filter_mac, "\x1a\x00\x00\x00\x00\x00", 6);
@@ -412,33 +372,80 @@ void doit_csi_init(void)
 }
 
 /* 启动雷达校准 */
-void start_csi_calib(void)
+bool start_csi_calib(void)
 {
     /* 启动雷达训练（校准） */
-    esp_radar_train_start();
+    SetIsStartCalibRunning(true);
+    xTaskCreate(
+        trigger_router_send_data_task,
+        "trigger_router_send_data", 4 * 1024,
+        NULL,
+        5,
+        &trigger_router_send_data_task_handler);
+    esp_err_t ret = esp_radar_start();
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "esp_radar_start failed: %s", esp_err_to_name(ret));
+    }
+    else
+    {
+        ESP_LOGI(TAG, "esp_radar_start success");
+    }
+    ret = esp_radar_train_start();
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "esp_radar_train_start failed: %s", esp_err_to_name(ret));
+        return false;
+    }
+    ESP_LOGI(TAG, "校准开始");
+    g_console_input_config.train_start = true;
+    return true;
 }
 
 /* 关闭雷达校准 */
 void stop_csi_calib(void)
 {
     /* 停止训练，获取阈值 */
-    float someone_thr, move_thr;
-    esp_radar_train_stop(&someone_thr, &move_thr);
-    ESP_LOGI(TAG, "校准完成！有人阈值=%.6f，运动阈值=%.6f", someone_thr, move_thr);
+    ESP_LOGI(TAG, "校准完成前，有人阈值=%.6f，运动阈值=%.6f", g_console_input_config.predict_someone_threshold, g_console_input_config.predict_move_threshold);
+
+    /* 停止训练，获取阈值 */
+    float someone_thr = 0.0f, move_thr = 0.0f;
+    esp_err_t ret = esp_radar_train_stop(&someone_thr, &move_thr);
+
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "esp_radar_train_stop failed: %s", esp_err_to_name(ret));
+        // 这里可以选择重试或重新校准，先return不让下面的逻辑执行
+        return;
+    }
+
+    g_console_input_config.train_start = false;
+    if (!isnan(someone_thr))
+    {
+        g_console_input_config.predict_someone_threshold = someone_thr;
+    }
+    else
+    {
+        ESP_LOGI(TAG, "someone_thr is nan,use init value");
+    }
+    if (!isnan(move_thr))
+    {
+        g_console_input_config.predict_move_threshold = move_thr;
+    }
+    else
+    {
+        ESP_LOGI(TAG, "move_thr is nan,use init value");
+    }
+
+    ESP_LOGI(TAG, "校准完成，有人阈值=%.6f，运动阈值=%.6f", g_console_input_config.predict_someone_threshold, g_console_input_config.predict_move_threshold);
 }
 
 /* 启动 Ping/NULL 数据 + 雷达算法 */
 void start_csi_radar(void)
 {
     /* 启动雷达算法 */
-    if (!GetIsCsiRadarRunning())
-    {
-        // vTaskResume(csi_data_print_task_handler);
-        vTaskResume(trigger_router_send_data_task_handler);
-        esp_radar_start();
-        SetIsCsiRadarRunning(true);
-        ESP_LOGI(TAG, "系统已就绪，实时检测中...");
-    }
+    SetIsCsiRadarRunning(true);
+    esp_radar_start();
 }
 
 /* 关闭 Ping/NULL 数据 + 雷达算法 */
@@ -447,10 +454,8 @@ void stop_csi_radar(void)
     if (GetIsCsiRadarRunning())
     {
         /* 关闭雷达算法 */
-        esp_radar_stop();
-        // vTaskSuspend(csi_data_print_task_handler);
-        vTaskSuspend(trigger_router_send_data_task_handler);
         SetIsCsiRadarRunning(false);
+        esp_radar_stop();
         ESP_LOGI(TAG, "系统已停止，实时检测已关闭");
     }
 }
@@ -478,4 +483,21 @@ void SetIsStartCalibRunning(bool value)
 void SetIsCsiRadarRunning(bool value)
 {
     is_csi_radar_running = value;
+}
+
+void register_human_status_cb(csi_human_status_cb_t cb)
+{
+    g_human_status_cb = cb;
+}
+
+void addSomeoneSensitivity()
+{
+    g_console_input_config.predict_someone_sensitivity += 0.01;
+    ESP_LOGI(TAG, "add+++predict_someone_sensitivity=%.6f", g_console_input_config.predict_someone_sensitivity);
+}
+
+void minusSomeoneSensitivity()
+{
+    g_console_input_config.predict_someone_sensitivity -= 0.01;
+    ESP_LOGI(TAG, "minus---predict_someone_sensitivity=%.6f", g_console_input_config.predict_someone_sensitivity);
 }

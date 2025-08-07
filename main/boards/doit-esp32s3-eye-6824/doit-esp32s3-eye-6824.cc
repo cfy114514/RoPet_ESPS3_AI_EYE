@@ -85,14 +85,16 @@ private:
         // 当boot_button_被点击时，执行以下操作
         boot_button_.OnClick([this]()
                              {
-            // 获取应用程序实例
-            auto& app = Application::GetInstance();
-            // 如果设备状态为kDeviceStateStarting且WifiStation未连接，则重置Wifi配置
-            if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
-                ResetWifiConfiguration();
-            }
-            // 切换聊天状态
-            app.ToggleChatState(); });
+            // // 获取应用程序实例
+            // auto& app = Application::GetInstance();
+            // // 如果设备状态为kDeviceStateStarting且WifiStation未连接，则重置Wifi配置
+            // if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
+            //     ResetWifiConfiguration();
+            // }
+            // // 切换聊天状态
+            // app.ToggleChatState();
+            addSomeoneSensitivity(); });
+
         boot_button_.OnPressRepeat([this](uint16_t count)
                                    {
             if(count >= 3){
@@ -107,6 +109,9 @@ private:
                 return;
             }
             audio_codec.OtaStart(0); });
+#else
+        boot_button_.OnDoubleClick([this]()
+                                   { minusSomeoneSensitivity(); });
 #endif
         // boot_button_.OnDoubleClick([this]() {
         //     auto& app = Application::GetInstance();
@@ -219,12 +224,13 @@ private:
         display->ShowNotification(notification.c_str(), 30000); });
         wifi_station.OnConnected([this](const std::string &ssid)
                                  {
-        auto display = Board::GetInstance().GetDisplay();
-        std::string notification = Lang::Strings::CONNECTED_TO;
-        notification += ssid;
-        display->ShowNotification(notification.c_str(), 30000);
-        // 初始化CSI
-        CSIController::GetInstance().Init(); });
+                                     auto display = Board::GetInstance().GetDisplay();
+                                     std::string notification = Lang::Strings::CONNECTED_TO;
+                                     notification += ssid;
+                                     display->ShowNotification(notification.c_str(), 30000);
+                                     // // 初始化CSI
+                                     // CSIController::GetInstance().Init();
+                                 });
         wifi_station.Start();
 
         // Try to connect to WiFi, if failed, launch the WiFi configuration AP
