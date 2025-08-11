@@ -229,6 +229,9 @@ choice BOARD_TYPE
     config BOARD_TYPE_DOIT_S3_AIBOX
         bool "四博智联AI陪伴盒子"
         depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_AWAKEN_AIBOARD
+        bool "awaken AI Board"
+        depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_MIXGO_NOVA
         bool "元控·青春"
         depends on IDF_TARGET_ESP32S3
