@@ -15,7 +15,7 @@
 
 #define BOOT_BUTTON_GPIO        GPIO_NUM_0
 #define SLEEP_GOIO              GPIO_NUM_9
-#define BUILTIN_LED_GPIO        GPIO_NUM_1
+#define BUILTIN_LED_GPIO        GPIO_NUM_7
 
 //分辨率
 #if CONFIG_LCD_GC9A01_240X240
