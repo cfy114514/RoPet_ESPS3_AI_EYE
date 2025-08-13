@@ -731,41 +731,79 @@ void Application::Start() {
     wake_word_->OnWakeWordDetected([this](const std::string& wake_word) {
         Schedule([this, &wake_word]() {
             if (!protocol_) {
+                ESP_LOGE(TAG, "OnWakeWordDetected: Protocol not initialized, cannot proceed.");
                 return;
             }
 
-            if (device_state_ == kDeviceStateIdle) {
-                wake_word_->EncodeWakeWordData();
+            ESP_LOGI(TAG, "OnWakeWordDetected (Scheduled Task): Current device state: %s", STATE_STRINGS[device_state_]);
+
+            // 1. 如果设备正在说话，则中断它并返回。
+            //    中断说话通常会使设备回到 Idle，不会立即进入 Listening。
+            if (device_state_ == kDeviceStateSpeaking) {
+                ESP_LOGI(TAG, "OnWakeWordDetected: Device is speaking, aborting speaking due to wake word.");
+                AbortSpeaking(kAbortReasonWakeWordDetected);
+                return; 
+            }
+
+            // 2. 如果设备已经处于监听状态，则忽略本次唤醒词，避免重复操作。
+            if (device_state_ == kDeviceStateListening) {
+                ESP_LOGI(TAG, "OnWakeWordDetected: Device is already listening, ignoring redundant wake word invocation.");
+                return;
+            }
+
+            // 3. 如果设备处于 'Activating' 状态，将其显式设置为 'Idle'。
+            //    这有助于统一后续启动监听的入口。
+            if (device_state_ == kDeviceStateActivating) {
+                ESP_LOGI(TAG, "OnWakeWordDetected: Device is in Activating state, setting to Idle.");
+                SetDeviceState(kDeviceStateIdle); // SetDeviceState(IDLE) 会停止 AudioProcessor 并启动 WakeWord 检测。
+            }
+            
+            // 4. 对于 Idle 状态（或从 Activating 转换后的 Idle），执行启动监听的核心逻辑。
+            //    如果设备在逻辑上处于“思考中”但被归类为 kDeviceStateIdle，此条件也将覆盖。
+            if (device_state_ == kDeviceStateIdle) { // 移除了 '|| device_state_ == kDeviceStateThinking' 以解决编译错误
+                ESP_LOGI(TAG, "OnWakeWordDetected: Device is idle. Proceeding to open audio channel and listen.");
+                
+                wake_word_->EncodeWakeWordData(); // 唤醒词特有：编码唤醒词数据
 
                 if (!protocol_->IsAudioChannelOpened()) {
-                    SetDeviceState(kDeviceStateConnecting);
+                    SetDeviceState(kDeviceStateConnecting); // 临时设置为连接中状态
                     if (!protocol_->OpenAudioChannel()) {
-                        wake_word_->StartDetection();
+                        ESP_LOGE(TAG, "OnWakeWordDetected: Failed to open audio channel. Re-enabling wake word detection.");
+                        wake_word_->StartDetection(); // 如果通道打开失败，重新启用唤醒词检测
+                        SetDeviceState(kDeviceStateIdle); // 恢复到 Idle 状态
                         return;
                     }
+                    ESP_LOGI(TAG, "OnWakeWordDetected: Audio channel opened.");
+                } else {
+                    ESP_LOGI(TAG, "OnWakeWordDetected: Audio channel already open.");
                 }
 
-                ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
+                ESP_LOGI(TAG, "Wake word detected: %s. Setting listening mode.", wake_word.c_str());
+                SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
+
 #if CONFIG_USE_AFE_WAKE_WORD
                 AudioStreamPacket packet;
-                // Encode and send the wake word data to the server
+                // 编码并发送唤醒词数据到服务器
                 while (wake_word_->GetWakeWordOpus(packet.payload)) {
                     protocol_->SendAudio(packet);
                 }
-                // Set the chat state to wake word detected
+                // 设置聊天状态为唤醒词已检测到
                 protocol_->SendWakeWordDetected(wake_word);
 #else
-                // Play the pop up sound to indicate the wake word is detected
-                // And wait 60ms to make sure the queue has been processed by audio task
+                // 播放弹出音以指示唤醒词已检测到
+                // 并等待 60 毫秒以确保队列已被音频任务处理
                 ResetDecoder();
                 PlaySound(Lang::Sounds::P3_POPUP);
                 vTaskDelay(pdMS_TO_TICKS(60));
+                // 设置聊天状态为唤醒词已检测到
+                protocol_->SendWakeWordDetected(wake_word);
 #endif
-                SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
-            } else if (device_state_ == kDeviceStateSpeaking) {
-                AbortSpeaking(kAbortReasonWakeWordDetected);
-            } else if (device_state_ == kDeviceStateActivating) {
-                SetDeviceState(kDeviceStateIdle);
+                ESP_LOGI(TAG, "OnWakeWordDetected: Wake word flow completed. Device state: %s", STATE_STRINGS[device_state_]);
+
+            } else {
+                // 对于任何其他意外状态（例如，Upgrading, FatalError, Unknown, 或未被显式处理的“思考中”状态），
+                // 记录警告并忽略唤醒词。
+                ESP_LOGW(TAG, "OnWakeWordDetected: Unexpected device state %s (%d), ignoring wake word.", STATE_STRINGS[device_state_], device_state_);
             }
         });
     });
@@ -1241,26 +1279,70 @@ void Application::Reboot() {
 }
 
 void Application::WakeWordInvoke(const std::string& wake_word) {
-    if (device_state_ == kDeviceStateIdle) {
-        ToggleChatState();
-        Schedule([this, wake_word]() {
-            if (protocol_) {
-                protocol_->SendWakeWordDetected(wake_word); 
-            }
-        }); 
-    } else if (device_state_ == kDeviceStateSpeaking) {
-        Schedule([this]() {
-            AbortSpeaking(kAbortReasonNone);
-        });
-    } else if (device_state_ == kDeviceStateListening) {   
-        Schedule([this]() {
-            if (protocol_) {
-                protocol_->CloseAudioChannel();
-            }
-        });
-    }
-}
+    // 所有 WakeWordInvoke 调用都应该被调度到主事件循环中
+    // 以确保状态转换是同步的并避免竞态条件。
+    Schedule([this, wake_word]() {
+        if (!protocol_) {
+            ESP_LOGE(TAG, "WakeWordInvoke: Protocol not initialized, cannot proceed.");
+            return;
+        }
 
+        ESP_LOGI(TAG, "WakeWordInvoke (Scheduled Task): Current device state: %s", STATE_STRINGS[device_state_]);
+
+        // 如果设备正在说话，则中断它并返回。
+        if (device_state_ == kDeviceStateSpeaking) {
+            ESP_LOGI(TAG, "WakeWordInvoke: Device is speaking, aborting speaking due to wake word.");
+            AbortSpeaking(kAbortReasonWakeWordDetected);
+            return;
+        } 
+        
+        // 如果设备已经处于监听状态，则忽略本次唤醒词，避免重复操作。
+        if (device_state_ == kDeviceStateListening) {   
+            ESP_LOGI(TAG, "WakeWordInvoke: Device is already listening, ignoring redundant wake word invocation.");
+            return;
+        }
+
+        // 简化逻辑：如果设备当前不是 Speaking 或 Listening，就尝试启动监听流程。
+        // 这涵盖了 Idle, Activating, Thinking, Unknown 等所有非交互状态。
+        ESP_LOGI(TAG, "WakeWordInvoke: Device state is %s. Attempting to initiate listening flow.", STATE_STRINGS[device_state_]);
+
+        wake_word_->EncodeWakeWordData(); // 编码唤醒词数据
+
+        // 如果音频通道未打开，则打开它。
+        // 如果协议层处理得当，重复调用 OpenAudioChannel 应该是安全的（幂等的）。
+        if (!protocol_->IsAudioChannelOpened()) {
+            SetDeviceState(kDeviceStateConnecting); // 临时状态：连接中
+            if (!protocol_->OpenAudioChannel()) {
+                ESP_LOGE(TAG, "WakeWordInvoke: Failed to open audio channel. Re-enabling wake word detection and reverting to idle.");
+                wake_word_->StartDetection(); // 如果通道打开失败，重新启用唤醒词检测
+                SetDeviceState(kDeviceStateIdle); // 恢复到 Idle 状态
+                return; // 退出调度任务
+            }
+            ESP_LOGI(TAG, "WakeWordInvoke: Audio channel opened.");
+        } else {
+             ESP_LOGI(TAG, "WakeWordInvoke: Audio channel already open.");
+        }
+
+        // 音频通道已打开或正在打开。设置监听模式。
+        SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
+        ESP_LOGI(TAG, "WakeWordInvoke: Listening mode set. Device state: %s", STATE_STRINGS[device_state_]);
+
+#if !CONFIG_USE_AFE_WAKE_WORD
+        ResetDecoder(); // 清除音频输出队列以便播放弹出音
+        PlaySound(Lang::Sounds::P3_POPUP); // 播放声音。PlaySound 会等待播放完成。
+#endif
+
+#if CONFIG_USE_AFE_WAKE_WORD
+        AudioStreamPacket packet;
+        while (wake_word_->GetWakeWordOpus(packet.payload)) {
+            protocol_->SendAudio(packet);
+        }
+#endif
+        // 发送唤醒词检测事件给协议层。
+        protocol_->SendWakeWordDetected(wake_word); 
+        ESP_LOGI(TAG, "Wake word '%s' processed successfully. Final state: %s", wake_word.c_str(), STATE_STRINGS[device_state_]);
+    });
+}
 bool Application::CanEnterSleepMode() {
     if (device_state_ != kDeviceStateIdle) {
         return false;
