@@ -37,9 +37,7 @@
 //     LV_FONT_DECLARE(font_puhui_14_1);
 //     LV_FONT_DECLARE(font_awesome_14_1);
 // #endif
-
-// 移除了 auto_wakeup_task 函数
-/*
+// 👇 在文件顶部添加这个任务函数
 void auto_wakeup_task(void *arg) {
     // 循环等待，直到应用状态变为空闲
     while (Application::GetInstance().GetDeviceState() != kDeviceStateIdle) {
@@ -48,13 +46,11 @@ void auto_wakeup_task(void *arg) {
 
     // 状态已就绪，执行唤醒
     ESP_LOGI("AutoWakeupTask", "Application is idle, invoking wake word.");
-    Application::GetInstance().WakeWordInvoke("你好秦彻");
+    Application::GetInstance().WakeWordInvoke("你好");
 
     // 任务完成，删除自身
     vTaskDelete(NULL);
 }
-*/
-
 class CompactWifiBoardLCD : public WifiBoard {
 private:
     // 禁用LCD显示功能，注释掉LCD相关的成员变量
@@ -140,12 +136,14 @@ void InitializeButtons() {
     });
 
         boot_button_.OnPressRepeat([this](uint16_t count) { 
+            // <-- 插入以下代码
             // 检查当前系统运行时间是否在保护期内
             if ((esp_timer_get_time() / 1000) < WIFI_CONFIG_PROTECTION_TIME_MS) {
                 ESP_LOGW(TAG, "系统启动保护期内，忽略重复按键触发配网。(当前时间: %lldms, 保护期: %lldms)", 
                             esp_timer_get_time() / 1000, WIFI_CONFIG_PROTECTION_TIME_MS);
                 return; // 如果在保护期内，则直接返回，不执行配网逻辑
             }
+            // <-- 插入以上代码结束
             if(count >= 3){
                 ESP_LOGI(TAG, "重新配网");
                 ResetWifiConfiguration();
@@ -266,19 +264,16 @@ public:
         InitializePowerSaveTimer();
 
         audio_codec.OnWakeUp([this](const std::string& command) {
-            // 当 VB6824 模组检测到唤醒词或其他命令时，将事件转发给 Application。
-            // Application 中的 WakeWordInvoke 函数将处理状态转换和协议通信。
-            ESP_LOGI(TAG, "VbAduioCodec OnWakeUp: Received command '%s'", command.c_str());
             if (command == std::string(vb6824_get_wakeup_word())){
-                // 收到唤醒词，转发给 Application 进行统一处理
-                Application::GetInstance().WakeWordInvoke(command); 
-            } else if (command == "开始配网"){
-                ESP_LOGI(TAG,"Command '%s' detected. Resetting Wifi configuration.", command.c_str());
+                if(Application::GetInstance().GetDeviceState() != kDeviceStateListening){
+                    Application::GetInstance().WakeWordInvoke("你好");
+                }
+            }else if (command == "开始配网"){
+                ESP_LOGI(TAG,"fff");
                 ResetWifiConfiguration();
             }
         });
-        // 🚨 移除了自动唤醒任务的创建，因为这可能是导致状态冲突的原因 🚨
-        // xTaskCreate(auto_wakeup_task, "auto_wakeup", 2048, NULL, 5, NULL);
+        xTaskCreate(auto_wakeup_task, "auto_wakeup", 2048, NULL, 5, NULL);
     }
 
     virtual Led* GetLed() override {
