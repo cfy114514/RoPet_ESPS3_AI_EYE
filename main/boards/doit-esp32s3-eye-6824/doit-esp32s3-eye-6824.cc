@@ -107,9 +107,6 @@ private:
                 return;
             }
             audio_codec.OtaStart(0); });
-#else
-        boot_button_.OnDoubleClick([this]()
-                                   { minusSomeoneSensitivity(); });
 #endif
         // boot_button_.OnDoubleClick([this]() {
         //     auto& app = Application::GetInstance();
