@@ -22,7 +22,6 @@
 #include "touch_button.h"
 #endif
 #include "assets/lang_config.h"
-// #include "csi_controller.h"
 #include <ssid_manager.h>
 
 #define TAG "CompactWifiBoardLCD"
@@ -85,15 +84,14 @@ private:
         // 当boot_button_被点击时，执行以下操作
         boot_button_.OnClick([this]()
                              {
-                                 // 获取应用程序实例
-                                 auto &app = Application::GetInstance();
-                                 // 如果设备状态为kDeviceStateStarting且WifiStation未连接，则重置Wifi配置
-                                 if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected())
-                                 {
-                                     ResetWifiConfiguration();
-                                 }
-                                 // 切换聊天状态
-                                 app.ToggleChatState(); });
+            // 获取应用程序实例
+            auto& app = Application::GetInstance();
+            // 如果设备状态为kDeviceStateStarting且WifiStation未连接，则重置Wifi配置
+            if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
+                ResetWifiConfiguration();
+            }
+            // 切换聊天状态
+            app.ToggleChatState(); });
 
         boot_button_.OnPressRepeat([this](uint16_t count)
                                    {
@@ -227,10 +225,7 @@ private:
                                      auto display = Board::GetInstance().GetDisplay();
                                      std::string notification = Lang::Strings::CONNECTED_TO;
                                      notification += ssid;
-                                     display->ShowNotification(notification.c_str(), 30000);
-                                     // // 初始化CSI
-                                     //  CSIController::GetInstance().Init();
-                                 });
+                                     display->ShowNotification(notification.c_str(), 30000); });
         wifi_station.Start();
 
         // Try to connect to WiFi, if failed, launch the WiFi configuration AP
@@ -246,10 +241,6 @@ private:
 public:
     CompactWifiBoardLCD() : boot_button_(BOOT_BUTTON_GPIO), audio_codec(CODEC_RX_GPIO, CODEC_TX_GPIO)
     {
-        // 检查CSI配置
-#if !defined(CONFIG_ESP_WIFI_CSI_ENABLED)
-#error "The ESP_WIFI_CSI_ENABLED was not enabled in the menuconfig"
-#endif
 
 // 如果定义了CONFIG_LCD_GC9A01_160X160，则配置GPIO引脚
 #if CONFIG_LCD_GC9A01_160X160

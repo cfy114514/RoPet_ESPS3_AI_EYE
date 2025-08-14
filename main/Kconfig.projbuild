@@ -475,5 +475,10 @@ config AUDIO_LOOP_TASK_STACK_SIZE
     int "audio_loop task stack size"
     default 2048 if IDF_TARGET_ESP32C2
     default 8192
-
+    
+config SPEAKING_FIRST_MUTE_TIME
+    int "speaking first mute time"
+    default 60
+    help
+        讲话之前静音时间
 endmenu
